@@ -1,131 +1,153 @@
 """
 Interactive UI Screens for PostgreSQL Migrator.
-Stunning, animated screens for the migration wizard.
+Premium, animated screens with neon dark aesthetic.
 """
 
-import sys
 import time
-from typing import Optional, Callable, Dict, Any, List
+from typing import Any, Callable, Dict, List, Optional
 
+from rich import box
 from rich.console import Console
-from rich.prompt import Prompt, Confirm, IntPrompt
+from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-from rich.layout import Layout
 from rich.text import Text
-from rich.align import Align
-from rich import box
 
-from .theme import (
-    get_theme,
-    COLORS,
-    BANNER_ART,
-    VERSION_FLOW,
-)
 from .components import (
-    create_console,
-    create_header,
-    create_panel,
-    create_status_indicator,
-    create_progress_bar,
-    create_database_table,
     create_compatibility_table,
-    create_step_indicator,
-    create_summary_panel,
+    create_console,
     create_divider,
-    create_menu,
-    LiveMigrationTracker,
-    create_animated_banner,
+    create_glass_panel,
+    create_header,
     create_loading_animation,
+    create_panel,
+    create_progress_bar,
+    create_status_indicator,
+    create_step_indicator,
     create_success_animation,
+    create_summary_panel,
+    create_wave_animation,
+)
+from .theme import (
+    BOX_CHARS,
+    COLORS,
+    SPINNERS,
 )
 
 
+# ──────────────────────────────────────────────────────────
+# Utility: Animated text typing effect
+# ──────────────────────────────────────────────────────────
+def _type_text(console: Console, text: str, style: str = "", delay: float = 0.01):
+    """Print text with a typing animation effect."""
+    for char in text:
+        console.print(char, end="", style=style, highlight=False)
+        time.sleep(delay)
+    console.print()
+
+
+def _fade_in_panel(console: Console, panel: Panel, steps: int = 3):
+    """Simulate a fade-in effect for a panel by printing with brief delay."""
+    time.sleep(0.05)
+    console.print(panel)
+    time.sleep(0.05)
+
+
+# ──────────────────────────────────────────────────────────
+# Welcome Screen
+# ──────────────────────────────────────────────────────────
 class WelcomeScreen:
-    """Welcome screen with pyfiglet banner."""
-    
+    """Welcome screen with animated neon banner."""
+
     def __init__(self, console: Optional[Console] = None):
         self.console = console or create_console()
-    
+
     def show(self) -> bool:
         """
-        Display welcome screen.
-        
+        Display welcome screen with animations.
+
         Returns:
             True if user wants to continue, False to exit
         """
         import pyfiglet
-        
+
         self.console.clear()
         self.console.print()
-        
-        # Generate banner using pyfiglet
+
+        # Animated gradient banner
         banner_text = pyfiglet.figlet_format("PG MIGRATOR", font="slant")
-        
-        # Display banner with color gradient
-        lines = banner_text.strip().split('\n')
-        colors = ["#38b2ac", "#319795", "#2c7a7b", "#285e61", "#234e52", "#1d4044"]
-        
+        lines = banner_text.strip().split("\n")
+        gradient = ["#22d3ee", "#2dd4bf", "#818cf8", "#a78bfa", "#c084fc", "#e879f9"]
+
         for i, line in enumerate(lines):
-            color = colors[i % len(colors)]
+            color = gradient[i % len(gradient)]
             self.console.print(f"[bold {color}]{line}[/]")
-        
+            time.sleep(0.04)
+
         self.console.print()
-        self.console.print("[bold #4299e1]    PostgreSQL Migration Wizard  v1.0[/]")
+        time.sleep(0.1)
+
+        # Subtitle with typing effect
+        _type_text(self.console, "    PostgreSQL Migration Wizard", style="#94a3b8", delay=0.02)
+        time.sleep(0.1)
+
+        # Version flow with sequential reveal
         self.console.print()
-        
-        # Version flow with colored numbers
-        version_line = Text()
-        version_line.append("        ")
-        version_line.append("14", style="bold #e53e3e")
-        version_line.append(" → ", style="dim")
-        version_line.append("15", style="bold #ed8936")
-        version_line.append(" → ", style="dim")
-        version_line.append("16", style="bold #ecc94b")
-        version_line.append(" → ", style="dim")
-        version_line.append("17", style="bold #48bb78")
-        version_line.append(" → ", style="dim")
-        version_line.append("18", style="bold #4299e1")
-        self.console.print(version_line)
+        versions = [
+            (" 14 ", "#fb7185"), (" 15 ", "#fbbf24"), (" 16 ", "#a3e635"),
+            (" 17 ", "#34d399"), (" 18 ", "#22d3ee"),
+        ]
+        flow = Text("        ")
+        for j, (ver, color) in enumerate(versions):
+            flow.append(ver, style=f"bold {color}")
+            if j < len(versions) - 1:
+                flow.append(" >> ", style="#334155")
+        self.console.print(flow)
         self.console.print()
-        
-        # Welcome panel
-        welcome_text = Text()
-        welcome_text.append("Welcome to PG Migrator!\n\n", style="bold #4299e1")
-        welcome_text.append("This wizard will guide you through migrating your PostgreSQL database.\n\n")
-        welcome_text.append("Features:\n", style="dim")
-        welcome_text.append("  • 🔍 Auto-detect PostgreSQL versions\n")
-        welcome_text.append("  • 📊 Pre-migration stats analysis\n")
-        welcome_text.append("  • ⚠️  Compatibility analysis with recommendations\n")
-        welcome_text.append("  • 🚀 Live animated progress tracking\n")
-        welcome_text.append("  • 🔄 Same-version and cross-version migrations\n")
-        welcome_text.append("  • 📝 Detailed logging\n")
-        
-        welcome_panel = Panel(
-            welcome_text,
-            title="[bold]🐘 PostgreSQL Migration Wizard[/bold]",
-            border_style="#336791",
-            padding=(1, 2),
-        )
-        self.console.print(welcome_panel)
+        time.sleep(0.1)
+
+        # Feature panel with glass effect
+        features = Text()
+        features.append("\n")
+        feature_list = [
+            (f" {BOX_CHARS['check']} ", "#34d399", "Auto-detect PostgreSQL versions (14-18)"),
+            (f" {BOX_CHARS['check']} ", "#22d3ee", "Pre-migration stats & compatibility analysis"),
+            (f" {BOX_CHARS['check']} ", "#a78bfa", "Live animated progress tracking"),
+            (f" {BOX_CHARS['check']} ", "#fbbf24", "Same-version & cross-version migrations"),
+            (f" {BOX_CHARS['check']} ", "#f472b6", "Pure Python migration (no pg_dump dependency)"),
+            (f" {BOX_CHARS['check']} ", "#a3e635", "Detailed logging & JSON reports"),
+        ]
+
+        for icon, color, desc in feature_list:
+            features.append(f"  [{color}]{icon}[/]", style=color)
+            features.append(f"  {desc}\n", style="#94a3b8")
+
+        features.append("\n")
+
+        panel = create_glass_panel(features, "Features", accent_color="#a78bfa")
+        _fade_in_panel(self.console, panel)
         self.console.print()
-        
+
         # Continue prompt
         return Confirm.ask(
-            "[bold #4299e1]Ready to begin?[/bold #4299e1]",
+            f"[bold #22d3ee]{BOX_CHARS['arrow']} Ready to begin?[/bold #22d3ee]",
             default=True,
             console=self.console,
         )
 
 
+# ──────────────────────────────────────────────────────────
+# Connection Screen
+# ──────────────────────────────────────────────────────────
 class ConnectionScreen:
-    """Screen for database connection configuration."""
-    
+    """Screen for database connection configuration with modern styling."""
+
     def __init__(self, console: Optional[Console] = None):
         self.console = console or create_console()
-    
+
     def get_connection_details(
         self,
         db_type: str = "source",
@@ -133,56 +155,62 @@ class ConnectionScreen:
     ) -> Dict[str, Any]:
         """
         Prompt user for database connection details.
-        
+
         Args:
             db_type: Either "source" or "target"
             defaults: Optional dictionary with default values from .env
-            
+
         Returns:
             Dictionary with connection parameters
         """
         defaults = defaults or {}
-        
-        title = "Source Database" if db_type == "source" else "Target Database (PG 18)"
-        icon = "📤" if db_type == "source" else "📥"
+
+        if db_type == "source":
+            title = "Source Database"
+            accent = "#fb7185"
+        else:
+            title = "Target Database"
+            accent = "#22d3ee"
+
         default_port = defaults.get("port", 5432 if db_type == "source" else 5433)
         default_host = defaults.get("host", "localhost")
         default_db = defaults.get("database", "postgres")
         default_user = defaults.get("user", "postgres")
         default_password = defaults.get("password", "")
-        
+
         self.console.print()
-        self.console.print(create_divider(f"{icon} {title} Connection"))
+        self.console.print(create_divider(f"{title} Connection"))
         self.console.print()
-        
+
+        prompt_style = f"bold {accent}"
+
         host = Prompt.ask(
-            "[input.label]Host[/input.label]",
+            f"[{prompt_style}]{BOX_CHARS['arrow']}[/] [#f1f5f9]Host[/]",
             default=default_host,
             console=self.console,
         )
-        
+
         port = IntPrompt.ask(
-            "[input.label]Port[/input.label]",
+            f"[{prompt_style}]{BOX_CHARS['arrow']}[/] [#f1f5f9]Port[/]",
             default=default_port,
             console=self.console,
         )
-        
+
         database = Prompt.ask(
-            "[input.label]Database[/input.label]",
+            f"[{prompt_style}]{BOX_CHARS['arrow']}[/] [#f1f5f9]Database[/]",
             default=default_db,
             console=self.console,
         )
-        
+
         user = Prompt.ask(
-            "[input.label]Username[/input.label]",
+            f"[{prompt_style}]{BOX_CHARS['arrow']}[/] [#f1f5f9]Username[/]",
             default=default_user,
             console=self.console,
         )
-        
-        # Only prompt for password if not already set
+
         if default_password:
             use_default = Confirm.ask(
-                "[input.label]Use saved password?[/input.label]",
+                f"[{prompt_style}]{BOX_CHARS['arrow']}[/] [#f1f5f9]Use saved password?[/]",
                 default=True,
                 console=self.console,
             )
@@ -190,17 +218,17 @@ class ConnectionScreen:
                 password = default_password
             else:
                 password = Prompt.ask(
-                    "[input.label]Password[/input.label]",
+                    f"[{prompt_style}]{BOX_CHARS['arrow']}[/] [#f1f5f9]Password[/]",
                     password=True,
                     console=self.console,
                 )
         else:
             password = Prompt.ask(
-                "[input.label]Password[/input.label]",
+                f"[{prompt_style}]{BOX_CHARS['arrow']}[/] [#f1f5f9]Password[/]",
                 password=True,
                 console=self.console,
             )
-        
+
         return {
             "host": host,
             "port": port,
@@ -208,7 +236,7 @@ class ConnectionScreen:
             "user": user,
             "password": password,
         }
-    
+
     def show_connection_test(
         self,
         source_info: Dict[str, Any],
@@ -216,148 +244,162 @@ class ConnectionScreen:
         source_connected: bool,
         target_connected: bool,
     ):
-        """Display connection test results."""
+        """Display connection test results with modern table."""
         self.console.print()
-        
+
         table = Table(
             show_header=True,
-            header_style="table.header",
+            header_style="bold #22d3ee",
             box=box.ROUNDED,
-            border_style=COLORS["pg_blue"],
-            title="[bold]Connection Status[/bold]",
+            border_style="#334155",
+            title="[bold #a78bfa] Connection Status [/]",
+            row_styles=["", "#1e293b"],
+            pad_edge=True,
+            padding=(0, 1),
         )
-        
-        table.add_column("Database", style="pg.accent")
-        table.add_column("Host", style="text_primary")
-        table.add_column("Port", style="text_primary")
+
+        table.add_column("", width=3, justify="center")
+        table.add_column("Database", style="#94a3b8", width=15)
+        table.add_column("Host", style="#f1f5f9")
+        table.add_column("Port", style="#f1f5f9")
         table.add_column("Status", justify="center")
-        
-        source_status = "[status.success]✓ Connected[/status.success]" if source_connected else "[status.error]✗ Failed[/status.error]"
-        target_status = "[status.success]✓ Connected[/status.success]" if target_connected else "[status.error]✗ Failed[/status.error]"
-        
-        table.add_row(
-            "Source",
-            source_info.get("host", "—"),
-            str(source_info.get("port", "—")),
-            source_status,
-        )
-        table.add_row(
-            "Target (PG18)",
-            target_info.get("host", "—"),
-            str(target_info.get("port", "—")),
-            target_status,
-        )
-        
+
+        s_icon = "[bold #34d399]●[/]" if source_connected else "[bold #fb7185]●[/]"
+        t_icon = "[bold #34d399]●[/]" if target_connected else "[bold #fb7185]●[/]"
+        s_status = "[#34d399]Connected[/]" if source_connected else "[#fb7185]Failed[/]"
+        t_status = "[#34d399]Connected[/]" if target_connected else "[#fb7185]Failed[/]"
+
+        table.add_row(s_icon, "Source", source_info.get("host", "---"), str(source_info.get("port", "---")), s_status)
+        table.add_row(t_icon, "Target", target_info.get("host", "---"), str(target_info.get("port", "---")), t_status)
+
         self.console.print(table)
 
 
+# ──────────────────────────────────────────────────────────
+# Version Screen
+# ──────────────────────────────────────────────────────────
 class VersionScreen:
-    """Screen for displaying detected versions."""
-    
+    """Screen for displaying detected versions with visual flow."""
+
     def __init__(self, console: Optional[Console] = None):
         self.console = console or create_console()
-    
+
     def show_detection(
         self,
         source_version: Optional[str] = None,
         target_version: Optional[str] = None,
     ):
-        """Display detected versions with visual flow."""
+        """Display detected versions with animated visual flow."""
         self.console.print()
-        self.console.print(create_divider("🔍 Version Detection"))
+        self.console.print(create_divider("Version Detection"))
         self.console.print()
-        
-        # Version flow visualization
-        flow_text = Text()
-        
+
+        content = Text()
+        content.append("\n")
+
         if source_version:
             major = source_version.split(".")[0] if source_version else "?"
-            flow_text.append("  Source: ", style="dim")
-            flow_text.append(f"PostgreSQL {source_version}", style=f"version.{major}" if major.isdigit() else "pg.primary")
-            flow_text.append("\n")
-        
-        flow_text.append("     ↓\n", style="pg.accent")
-        flow_text.append("  Migration Path\n", style="dim")
-        flow_text.append("     ↓\n", style="pg.accent")
-        
+            ver_color = f"version.{major}" if major.isdigit() else "pg.primary"
+            content.append(f"  {BOX_CHARS['diamond']} ", style="#fb7185")
+            content.append("Source  ", style="#64748b")
+            content.append(f"PostgreSQL {source_version}", style=ver_color)
+            content.append("\n")
+
+        content.append("       |\n", style="#334155")
+        content.append("       |  ", style="#334155")
+        content.append("migration path\n", style="#64748b")
+        content.append("       |\n", style="#334155")
+
         if target_version:
-            flow_text.append("  Target: ", style="dim")
-            flow_text.append(f"PostgreSQL {target_version}", style="version.18")
-        
-        panel = create_panel(flow_text, "Version Information", border_color="pg_blue_light")
-        self.console.print(panel)
+            content.append(f"  {BOX_CHARS['diamond']} ", style="#22d3ee")
+            content.append("Target  ", style="#64748b")
+            content.append(f"PostgreSQL {target_version}", style="version.18")
+
+        content.append("\n")
+
+        panel = create_glass_panel(content, "Version Information", accent_color="#818cf8")
+        _fade_in_panel(self.console, panel)
 
 
+# ──────────────────────────────────────────────────────────
+# Analysis Screen
+# ──────────────────────────────────────────────────────────
 class AnalysisScreen:
     """Screen for displaying compatibility analysis results."""
-    
+
     def __init__(self, console: Optional[Console] = None):
         self.console = console or create_console()
-    
+
     def show_analysis(self, analysis_result: Dict[str, Any]):
-        """Display compatibility analysis results."""
+        """Display compatibility analysis results with modern layout."""
         self.console.print()
-        self.console.print(create_divider("📊 Compatibility Analysis"))
+        self.console.print(create_divider("Compatibility Analysis"))
         self.console.print()
-        
-        # Summary stats
+
         summary = analysis_result.get("summary", {})
-        
-        stats_text = Text()
-        stats_text.append("  Schemas Analyzed: ", style="pg.accent")
-        stats_text.append(f"{summary.get('schemas', 0)}\n", style="text_primary")
-        stats_text.append("  Tables Analyzed: ", style="pg.accent")
-        stats_text.append(f"{summary.get('tables', 0)}\n", style="text_primary")
-        stats_text.append("\n")
-        
+
+        # Stats card
+        stats_content = Text()
+        stats_content.append("\n")
+        stats_content.append(f"  {BOX_CHARS['arrow']} Schemas Analyzed: ", style="#64748b")
+        stats_content.append(f"{summary.get('schemas', 0)}\n", style="#f1f5f9")
+        stats_content.append(f"  {BOX_CHARS['arrow']} Tables Analyzed:  ", style="#64748b")
+        stats_content.append(f"{summary.get('tables', 0)}\n", style="#f1f5f9")
+        stats_content.append("\n")
+
         critical = summary.get("critical", 0)
         warnings = summary.get("warnings", 0)
         info = summary.get("info", 0)
         opportunities = summary.get("opportunities", 0)
-        
+
         if critical > 0:
-            stats_text.append(f"  ❌ Critical Issues: {critical}\n", style="status.error")
+            stats_content.append(f"  {BOX_CHARS['cross']} Critical:      {critical}\n", style="#fb7185")
         if warnings > 0:
-            stats_text.append(f"  ⚠️  Warnings: {warnings}\n", style="status.warning")
+            stats_content.append(f"  {BOX_CHARS['diamond']} Warnings:      {warnings}\n", style="#fbbf24")
         if info > 0:
-            stats_text.append(f"  ℹ️  Info: {info}\n", style="status.info")
+            stats_content.append(f"  {BOX_CHARS['circle']} Info:          {info}\n", style="#60a5fa")
         if opportunities > 0:
-            stats_text.append(f"  ✨ Opportunities: {opportunities}\n", style="pg.highlight")
-        
-        panel = create_panel(stats_text, "Analysis Summary", border_color="pg_blue")
-        self.console.print(panel)
-        
+            stats_content.append(f"  {BOX_CHARS['star']} Opportunities: {opportunities}\n", style="#a78bfa")
+
+        stats_content.append("\n")
+
+        panel = create_glass_panel(stats_content, "Analysis Summary", accent_color="#818cf8")
+        _fade_in_panel(self.console, panel)
+
         # Issues table
         issues = analysis_result.get("issues", [])
         if issues:
             self.console.print()
             table = create_compatibility_table(issues)
             self.console.print(table)
-        
-        # Can proceed check
+
+        # Verdict
         can_proceed = summary.get("can_proceed", True)
         self.console.print()
-        
+
         if can_proceed:
             self.console.print(create_status_indicator(
                 "success",
-                "No blocking issues found. Ready to migrate!",
+                "No blocking issues found. Ready to migrate.",
             ))
         else:
             self.console.print(create_status_indicator(
                 "error",
                 "Critical issues must be resolved before migration.",
             ))
-        
+
         return can_proceed
 
 
+# ──────────────────────────────────────────────────────────
+# Migration Screen
+# ──────────────────────────────────────────────────────────
 class MigrationScreen:
     """Screen for displaying migration progress."""
-    
+
     def __init__(self, console: Optional[Console] = None):
         self.console = console or create_console()
-    
+
     def show_progress(
         self,
         steps: List[Dict[str, str]],
@@ -365,25 +407,21 @@ class MigrationScreen:
         status_message: str = "",
     ):
         """Display migration progress with step indicator."""
-        layout = Layout()
-        
-        # Steps panel
         steps_panel = create_step_indicator(steps, current_step)
-        
-        # Status panel
+
         status_text = Text()
-        status_text.append("  ", style="dim")
-        status_text.append(status_message, style="pg.accent")
-        
+        status_text.append(f"  {BOX_CHARS['arrow']} ", style="#334155")
+        status_text.append(status_message, style="#94a3b8")
+
         status_panel = create_panel(
             status_text,
             "Current Status",
-            border_color="pg_cyan",
+            border_color="#334155",
         )
-        
+
         self.console.print(steps_panel)
         self.console.print(status_panel)
-    
+
     def run_with_progress(
         self,
         task_name: str,
@@ -392,100 +430,114 @@ class MigrationScreen:
     ) -> Any:
         """Run a task with animated progress bar."""
         with create_progress_bar() as progress:
-            task = progress.add_task(f"[pg.accent]{task_name}[/pg.accent]", total=total)
-            
+            task = progress.add_task(f"[#22d3ee]{task_name}[/]", total=total)
+
             result = None
-            
+
             def update_progress(current: int):
                 progress.update(task, completed=current)
-            
+
             try:
                 result = task_func(update_progress)
                 progress.update(task, completed=total)
-            except Exception as e:
-                progress.update(task, description=f"[status.error]{task_name} - Failed[/status.error]")
+            except Exception:
+                progress.update(task, description=f"[#fb7185]{task_name} - Failed[/]")
                 raise
-            
+
             return result
 
 
+# ──────────────────────────────────────────────────────────
+# Migration Preview Screen
+# ──────────────────────────────────────────────────────────
 class MigrationPreviewScreen:
     """Screen for showing pre-migration stats and getting user confirmation."""
-    
+
     def __init__(self, console: Optional[Console] = None):
         self.console = console or create_console()
-    
-    def show_stats(self, stats: 'DatabaseStats', source_version: str, target_version: str) -> bool:
+
+    def show_stats(self, stats: Any, source_version: str, target_version: str) -> bool:
         """
         Display database statistics and ask for migration confirmation.
-        
+
         Args:
             stats: DatabaseStats object with collected statistics
             source_version: Source PostgreSQL version
             target_version: Target PostgreSQL version
-            
+
         Returns:
             True if user confirms migration, False otherwise
         """
         self.console.print()
-        self.console.print(create_divider("📊 Pre-Migration Analysis"))
+        self.console.print(create_divider("Pre-Migration Analysis"))
         self.console.print()
-        
+
         # Migration plan header
-        plan_text = Text()
-        plan_text.append("Migration Plan\n\n", style="bold #4299e1")
-        plan_text.append(f"  Source: PostgreSQL {source_version}\n", style="#e53e3e")
-        plan_text.append(f"  Target: PostgreSQL {target_version}\n", style="#48bb78")
-        
-        self.console.print(Panel(plan_text, border_style="#336791", padding=(0, 2)))
+        plan_content = Text()
+        plan_content.append("\n")
+        plan_content.append(f"  {BOX_CHARS['diamond']} ", style="#fb7185")
+        plan_content.append(f"Source: PostgreSQL {source_version}\n", style="#fb7185")
+        plan_content.append(f"  {BOX_CHARS['diamond']} ", style="#22d3ee")
+        plan_content.append(f"Target: PostgreSQL {target_version}\n", style="#22d3ee")
+        plan_content.append("\n")
+
+        plan_panel = create_glass_panel(plan_content, "Migration Plan", accent_color="#818cf8")
+        _fade_in_panel(self.console, plan_panel)
         self.console.print()
-        
+
         # Database Stats Table
         stats_table = Table(
-            title="[bold]Database Statistics[/bold]",
+            title="[bold #a78bfa] Database Statistics [/]",
             show_header=True,
-            header_style="bold #4299e1",
-            border_style="#336791",
+            header_style="bold #22d3ee",
+            border_style="#334155",
             box=box.ROUNDED,
+            row_styles=["", "#1e293b"],
+            pad_edge=True,
+            padding=(0, 1),
         )
-        
-        stats_table.add_column("Metric", style="#38b2ac", width=25)
-        stats_table.add_column("Count", justify="right", style="bold")
-        stats_table.add_column("Details", style="dim")
-        
-        stats_table.add_row("📁 Schemas", str(stats.total_schemas), "")
-        stats_table.add_row("📋 Tables", str(stats.total_tables), "")
-        stats_table.add_row("📊 Total Rows", f"{stats.total_rows:,}", "Approximate")
-        stats_table.add_row("💾 Total Size", stats.total_size_formatted, "Including indexes")
-        stats_table.add_row("🔍 Indexes", str(stats.total_indexes), "")
-        stats_table.add_row("👁️ Views", str(stats.total_views), "")
-        stats_table.add_row("⚡ Functions", str(stats.total_functions), "")
-        stats_table.add_row("🔢 Sequences", str(stats.total_sequences), "")
-        stats_table.add_row("🎯 Triggers", str(stats.total_triggers), "")
-        
+
+        stats_table.add_column("", width=3, justify="center", style="#334155")
+        stats_table.add_column("Metric", style="#94a3b8", width=20)
+        stats_table.add_column("Count", justify="right", style="bold #f1f5f9")
+        stats_table.add_column("Details", style="#64748b")
+
+        stats_table.add_row(BOX_CHARS["arrow"], "Schemas", str(stats.total_schemas), "")
+        stats_table.add_row(BOX_CHARS["arrow"], "Tables", str(stats.total_tables), "")
+        stats_table.add_row(BOX_CHARS["arrow"], "Total Rows", f"{stats.total_rows:,}", "Approximate")
+        stats_table.add_row(BOX_CHARS["arrow"], "Total Size", stats.total_size_formatted, "Including indexes")
+        stats_table.add_row(BOX_CHARS["arrow"], "Indexes", str(stats.total_indexes), "")
+        stats_table.add_row(BOX_CHARS["arrow"], "Views", str(stats.total_views), "")
+        stats_table.add_row(BOX_CHARS["arrow"], "Functions", str(stats.total_functions), "")
+        stats_table.add_row(BOX_CHARS["arrow"], "Sequences", str(stats.total_sequences), "")
+        stats_table.add_row(BOX_CHARS["arrow"], "Triggers", str(stats.total_triggers), "")
+
         if stats.extensions:
-            stats_table.add_row("🧩 Extensions", str(len(stats.extensions)), ", ".join(stats.extensions[:5]))
-        
+            stats_table.add_row(BOX_CHARS["arrow"], "Extensions", str(len(stats.extensions)), ", ".join(stats.extensions[:5]))
+
         self.console.print(stats_table)
         self.console.print()
-        
-        # Top tables by size
+
+        # Top tables
         if stats.tables:
             top_tables = sorted(stats.tables, key=lambda t: t.row_count, reverse=True)[:10]
-            
+
             tables_table = Table(
-                title="[bold]Top Tables by Row Count[/bold]",
+                title="[bold #a78bfa] Top Tables by Row Count [/]",
                 show_header=True,
-                header_style="bold #4299e1",
-                border_style="#336791",
+                header_style="bold #22d3ee",
+                border_style="#334155",
                 box=box.ROUNDED,
+                row_styles=["", "#1e293b"],
+                pad_edge=True,
+                padding=(0, 1),
             )
-            
-            tables_table.add_column("Table", style="#38b2ac")
-            tables_table.add_column("Rows", justify="right", style="bold")
-            tables_table.add_column("Size", justify="right")
-            tables_table.add_column("Columns", justify="center")
-            
+
+            tables_table.add_column("Table", style="#22d3ee")
+            tables_table.add_column("Rows", justify="right", style="bold #f1f5f9")
+            tables_table.add_column("Size", justify="right", style="#94a3b8")
+            tables_table.add_column("Columns", justify="center", style="#64748b")
+
             for table in top_tables:
                 tables_table.add_row(
                     table.full_name,
@@ -493,197 +545,211 @@ class MigrationPreviewScreen:
                     table.size_formatted,
                     str(table.column_count),
                 )
-            
+
             self.console.print(tables_table)
             self.console.print()
-        
-        # Migration steps preview
+
+        # Complexity indicator
         steps = stats.get_migration_steps()
         total_weight = stats.get_total_weight()
-        
-        steps_text = Text()
-        steps_text.append("Migration Steps\n\n", style="bold #4299e1")
-        steps_text.append(f"  Total steps: {len(steps)}\n", style="dim")
-        steps_text.append(f"  Estimated complexity: ", style="dim")
-        
+
+        complexity_content = Text()
+        complexity_content.append("\n")
+        complexity_content.append(f"  {BOX_CHARS['arrow']} Total Steps:  ", style="#64748b")
+        complexity_content.append(f"{len(steps)}\n", style="#f1f5f9")
+        complexity_content.append(f"  {BOX_CHARS['arrow']} Complexity:   ", style="#64748b")
+
         if total_weight < 50:
-            steps_text.append("Low", style="bold #48bb78")
+            complexity_content.append("Low", style="bold #34d399")
         elif total_weight < 150:
-            steps_text.append("Medium", style="bold #ed8936")
+            complexity_content.append("Medium", style="bold #fbbf24")
         else:
-            steps_text.append("High", style="bold #e53e3e")
-        
-        steps_text.append(f" (weight: {total_weight})\n", style="dim")
-        
-        self.console.print(Panel(steps_text, border_style="#336791", padding=(0, 2)))
+            complexity_content.append("High", style="bold #fb7185")
+
+        complexity_content.append(f"  [#334155](weight: {total_weight})[/]\n\n", style="#64748b")
+
+        panel = create_glass_panel(complexity_content, "Migration Steps", accent_color="#818cf8")
+        self.console.print(panel)
         self.console.print()
-        
-        # Confirmation prompt
-        self.console.print("[bold #ed8936]⚠️  The migration will start after confirmation.[/]")
-        self.console.print("[dim]   A backup of your data is recommended before proceeding.[/]")
+
+        # Warning
+        self.console.print(f"  [bold #fbbf24]{BOX_CHARS['diamond']}[/] [#fbbf24]The migration will start after confirmation.[/]")
+        self.console.print(f"  [#64748b]  A backup of your data is recommended before proceeding.[/]")
         self.console.print()
-        
+
         return Confirm.ask(
-            "[bold #4299e1]Proceed with migration?[/bold #4299e1]",
+            f"[bold #22d3ee]{BOX_CHARS['arrow']} Proceed with migration?[/bold #22d3ee]",
             default=False,
             console=self.console,
         )
-    
+
     def run_animated_migration(
         self,
-        stats: 'DatabaseStats',
+        stats: Any,
         migration_callback: Callable[[Callable[[str, int], None]], bool],
     ) -> bool:
         """
         Run migration with animated progress based on stats.
-        
+
         Args:
             stats: DatabaseStats for progress calculation
             migration_callback: Function that runs migration and accepts progress callback
-            
+
         Returns:
             True if migration succeeded, False otherwise
         """
-        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
-        
+        from rich.progress import TaskProgressColumn, TimeElapsedColumn
+
         self.console.print()
-        self.console.print(create_divider("🚀 Migration in Progress"))
+        self.console.print(create_divider("Migration in Progress"))
         self.console.print()
-        
+
         total_weight = stats.get_total_weight()
         steps = stats.get_migration_steps()
-        
+
         with Progress(
-            SpinnerColumn(spinner_name="dots12", style="#38b2ac"),
+            SpinnerColumn(spinner_name="dots12", style="#22d3ee"),
             TextColumn("[bold]{task.description}[/bold]"),
-            BarColumn(bar_width=40, style="#336791", complete_style="#38b2ac", finished_style="#48bb78"),
+            BarColumn(bar_width=40, style="#334155", complete_style="#22d3ee", finished_style="#34d399"),
             TaskProgressColumn(),
-            TextColumn("•"),
+            TextColumn("[#334155]|[/]"),
             TimeElapsedColumn(),
             console=self.console,
             expand=True,
         ) as progress:
-            
-            main_task = progress.add_task("[#4299e1]Overall Progress[/]", total=100)
-            current_task = progress.add_task("[dim]Initializing...[/]", total=100)
-            
+
+            main_task = progress.add_task("[#22d3ee]Overall Progress[/]", total=100)
+            current_task = progress.add_task("[#64748b]Initializing...[/]", total=100)
+
             current_weight = 0
-            
+
             def update_progress(step_name: str, step_pct: int):
                 nonlocal current_weight
-                
-                # Update current step display
-                progress.update(current_task, description=f"[dim]{step_name}[/]", completed=step_pct)
-                
-                # Calculate overall progress based on weights
+
+                progress.update(current_task, description=f"[#94a3b8]{step_name}[/]", completed=step_pct)
+
                 if step_pct == 100:
-                    # Find the weight of completed step
                     for step in steps:
                         if step["name"] == step_name:
                             current_weight += step["weight"]
                             break
-                
+
                 overall_pct = min(100, int((current_weight / total_weight) * 100))
                 progress.update(main_task, completed=overall_pct)
-            
+
             try:
                 success = migration_callback(update_progress)
-                
-                # Complete progress
+
                 progress.update(main_task, completed=100)
-                progress.update(current_task, description="[#48bb78]Completed![/]", completed=100)
-                
+                progress.update(current_task, description="[#34d399]Completed[/]", completed=100)
+
                 return success
-                
+
             except Exception as e:
-                progress.update(current_task, description=f"[#e53e3e]Error: {str(e)[:30]}...[/]")
+                progress.update(current_task, description=f"[#fb7185]Error: {str(e)[:30]}[/]")
                 return False
 
 
+# ──────────────────────────────────────────────────────────
+# Summary Screen
+# ──────────────────────────────────────────────────────────
 class SummaryScreen:
     """Screen for displaying migration summary."""
-    
+
     def __init__(self, console: Optional[Console] = None):
         self.console = console or create_console()
-    
+
     def show_summary(
         self,
         success: bool,
         stats: Dict[str, Any],
         duration: str,
     ):
-        """Display final migration summary."""
+        """Display final migration summary with animations."""
         self.console.print()
-        self.console.print(create_divider("📋 Migration Summary"))
+        self.console.print(create_divider("Migration Summary"))
         self.console.print()
-        
-        panel = create_summary_panel(success, stats, duration)
-        self.console.print(panel)
-        
+
         if success:
-            self.console.print()
-            self.console.print(Text.from_markup(
-                "\n[pg.highlight]🎊 Congratulations![/pg.highlight] "
-                "Your database has been successfully migrated to PostgreSQL 18.\n\n"
-                "[dim]Next steps:[/dim]\n"
-                "  • Review the migration logs\n"
-                "  • Run your application test suite\n"
-                "  • Monitor database performance\n"
-                "  • Consider enabling new PG18 features (AIO, UUIDv7, etc.)\n"
-            ))
+            create_success_animation(self.console)
+            time.sleep(0.2)
+
+        panel = create_summary_panel(success, stats, duration)
+        _fade_in_panel(self.console, panel)
+
+        if success:
+            next_steps = Text()
+            next_steps.append("\n")
+            next_steps.append("  [bold #34d399]Migration completed successfully.[/]\n\n")
+            next_steps.append("  [#64748b]Next steps:[/]\n")
+            tips = [
+                ("Review the migration logs", "#22d3ee"),
+                ("Run your application test suite", "#a78bfa"),
+                ("Monitor database performance", "#fbbf24"),
+                ("Consider enabling PG18 features (AIO, UUIDv7)", "#34d399"),
+            ]
+            for tip, color in tips:
+                next_steps.append(f"    [{color}]{BOX_CHARS['arrow']}[/] [{color}]{tip}[/]\n")
+            next_steps.append("\n")
+            self.console.print(next_steps)
         else:
-            self.console.print()
-            self.console.print(Text.from_markup(
-                "\n[status.error]Migration encountered issues.[/status.error]\n\n"
-                "[dim]Troubleshooting:[/dim]\n"
-                "  • Check the error messages above\n"
-                "  • Review the migration logs\n"
-                "  • Your backup is available for restoration\n"
-                "  • Consult PostgreSQL 18 release notes\n"
-            ))
+            troubleshoot = Text()
+            troubleshoot.append("\n")
+            troubleshoot.append("  [bold #fb7185]Migration encountered issues.[/]\n\n")
+            troubleshoot.append("  [#64748b]Troubleshooting:[/]\n")
+            tips = [
+                ("Check the error messages above", "#fb7185"),
+                ("Review the migration logs", "#fbbf24"),
+                ("Your backup is available for restoration", "#22d3ee"),
+                ("Consult PostgreSQL 18 release notes", "#a78bfa"),
+            ]
+            for tip, color in tips:
+                troubleshoot.append(f"    [{color}]{BOX_CHARS['arrow']}[/] [{color}]{tip}[/]\n")
+            troubleshoot.append("\n")
+            self.console.print(troubleshoot)
 
 
+# ──────────────────────────────────────────────────────────
+# Migration Wizard (Orchestrator)
+# ──────────────────────────────────────────────────────────
 class MigrationWizard:
     """Main wizard that orchestrates all screens."""
-    
+
     def __init__(self, console: Optional[Console] = None):
         self.console = console or create_console()
-        
-        # Initialize screens
+
         self.welcome = WelcomeScreen(self.console)
         self.connection = ConnectionScreen(self.console)
         self.version = VersionScreen(self.console)
         self.analysis = AnalysisScreen(self.console)
         self.migration = MigrationScreen(self.console)
         self.summary = SummaryScreen(self.console)
-        
-        # Defaults from .env (set by main.py)
+
         self.env_defaults: Optional[Dict[str, Any]] = None
-    
+
     def run(self) -> bool:
         """
         Run the complete migration wizard.
-        
+
         Returns:
             True if migration successful, False otherwise
         """
         try:
             # Welcome screen
             if not self.welcome.show():
-                self.console.print("\n[dim]Migration cancelled.[/dim]")
+                self.console.print(f"\n  [#64748b]Migration cancelled.[/]")
                 return False
-            
+
             # Get connection details
             self.console.clear()
             self.console.print(create_header())
-            
-            # Pass env defaults to connection prompts
+
             source_defaults = self.env_defaults.get("source", {}) if self.env_defaults else {}
             target_defaults = self.env_defaults.get("target", {}) if self.env_defaults else {}
-            
+
             source_conn = self.connection.get_connection_details("source", source_defaults)
             target_conn = self.connection.get_connection_details("target", target_defaults)
-            
+
             # Build DSNs
             source_dsn = (
                 f"host={source_conn['host']} "
@@ -692,7 +758,6 @@ class MigrationWizard:
                 f"user={source_conn['user']} "
                 f"password={source_conn['password']}"
             )
-            
             target_dsn = (
                 f"host={target_conn['host']} "
                 f"port={target_conn['port']} "
@@ -700,132 +765,129 @@ class MigrationWizard:
                 f"user={target_conn['user']} "
                 f"password={target_conn['password']}"
             )
-            
-            # Import migration dependencies
-            from ..detector import VersionDetector
+
             from ..analyzer import analyze_compatibility
-            from ..migrator import MigrationEngine, MigrationContext, MigrationMethod
+            from ..detector import VersionDetector
             from ..logger import get_logger
-            
+            from ..migrator import MigrationContext, MigrationEngine, MigrationMethod
+
             logger = get_logger()
-            
-            # Step 1: Test connections and detect versions
+
+            # Test connections
             self.console.print()
-            self.console.print(create_divider("🔌 Testing Connections"))
-            
+            self.console.print(create_divider("Testing Connections"))
+
             source_version = None
             target_version = None
-            
+
+            # Loading animation
+            create_loading_animation(self.console, "Connecting to source", duration=0.5)
+
             try:
                 with VersionDetector(source_dsn) as detector:
                     source_version = detector.detect_version()
                     if source_version:
-                        self.console.print(f"[status.success]✓ Source: PostgreSQL {source_version}[/status.success]")
+                        self.console.print(create_status_indicator("success", f"Source: PostgreSQL {source_version}"))
                     else:
-                        self.console.print("[status.error]✗ Cannot connect to source database[/status.error]")
+                        self.console.print(create_status_indicator("error", "Cannot connect to source database"))
                         return False
             except Exception as e:
-                self.console.print(f"[status.error]✗ Source connection error: {e}[/status.error]")
+                self.console.print(create_status_indicator("error", f"Source connection error: {e}"))
                 return False
-            
-            # Try to connect to target - if database doesn't exist, create it
+
+            create_loading_animation(self.console, "Connecting to target", duration=0.5)
+
             try:
                 with VersionDetector(target_dsn) as detector:
                     target_version = detector.detect_version()
                     if target_version:
-                        self.console.print(f"[status.success]✓ Target: PostgreSQL {target_version}[/status.success]")
-            except Exception as e:
-                # Database might not exist - try to create it
-                self.console.print(f"[status.warning]⚠ Target database may not exist, attempting to create...[/status.warning]")
-                
+                        self.console.print(create_status_indicator("success", f"Target: PostgreSQL {target_version}"))
+            except Exception:
+                self.console.print(create_status_indicator("warning", "Target database may not exist, attempting to create..."))
+
                 from ..db_manager import DatabaseManager
-                
+
                 try:
-                    # Connect to postgres database to create target
                     manager = DatabaseManager(
                         host=target_conn["host"],
                         port=target_conn["port"],
                         user=target_conn["user"],
                         password=target_conn["password"],
                     )
-                    
+
                     success, msg = manager.prepare_target_database(
                         dbname=target_conn["database"],
                         drop_if_exists=True,
                         owner=target_conn["user"],
                     )
-                    
+
                     if success:
-                        self.console.print(f"[status.success]✓ Created target database: {target_conn['database']}[/status.success]")
-                        
-                        # Now try to detect version again
+                        self.console.print(create_status_indicator("success", f"Created target database: {target_conn['database']}"))
+
                         with VersionDetector(target_dsn) as detector:
                             target_version = detector.detect_version()
                             if target_version:
-                                self.console.print(f"[status.success]✓ Target: PostgreSQL {target_version}[/status.success]")
+                                self.console.print(create_status_indicator("success", f"Target: PostgreSQL {target_version}"))
                             else:
-                                self.console.print("[status.error]✗ Cannot connect to newly created database[/status.error]")
+                                self.console.print(create_status_indicator("error", "Cannot connect to newly created database"))
                                 return False
                     else:
-                        self.console.print(f"[status.error]✗ Failed to create target database: {msg}[/status.error]")
+                        self.console.print(create_status_indicator("error", f"Failed to create target database: {msg}"))
                         return False
                 except Exception as create_error:
-                    self.console.print(f"[status.error]✗ Cannot create target database: {create_error}[/status.error]")
+                    self.console.print(create_status_indicator("error", f"Cannot create target database: {create_error}"))
                     return False
-            
+
             # Show version detection
             self.version.show_detection(str(source_version), str(target_version))
-            
-            # Step 2: Analyze compatibility
+
+            # Analyze compatibility
             self.console.print()
-            self.console.print(create_divider("📊 Analyzing Compatibility"))
-            
+            create_loading_animation(self.console, "Analyzing compatibility", duration=0.5)
+
             try:
                 result = analyze_compatibility(source_dsn, source_version.major)
                 summary = result.get_summary()
-                
+
                 self.analysis.show_analysis({
                     "summary": summary,
                     "issues": [i.to_dict() for i in result.issues],
                 })
-                
+
                 can_proceed = summary.get("can_proceed", True)
             except Exception as e:
-                self.console.print(f"[status.error]Analysis error: {e}[/status.error]")
-                can_proceed = True  # Allow to proceed with warning
-            
+                self.console.print(create_status_indicator("error", f"Analysis error: {e}"))
+                can_proceed = True
+
             # Ask to proceed
             self.console.print()
             proceed = Confirm.ask(
-                "[pg.accent]Would you like to proceed with migration?[/pg.accent]",
+                f"[bold #22d3ee]{BOX_CHARS['arrow']} Proceed with migration?[/bold #22d3ee]",
                 default=can_proceed,
                 console=self.console,
             )
-            
+
             if not proceed:
-                self.console.print("\n[dim]Migration cancelled by user.[/dim]")
+                self.console.print(f"\n  [#64748b]Migration cancelled by user.[/]")
                 return False
-            
-            # Step 3: Run the actual migration
+
+            # Run migration
             self.console.print()
-            self.console.print(create_divider("🚀 Performing Migration"))
+            self.console.print(create_divider("Performing Migration"))
             self.console.print()
-            
-            # Create migration context (use PYTHON method - no pg_dump dependency)
+
             context = MigrationContext(
                 source_dsn=source_dsn,
                 target_dsn=target_dsn,
                 method=MigrationMethod.PYTHON,
                 dry_run=False,
             )
-            
-            # Create and run engine
+
             engine = MigrationEngine(context)
             success = engine.run()
-            
-            # Show summary with actual data
+
             migration_summary = engine.get_summary()
-            
+
             self.summary.show_summary(
                 success=success,
                 stats={
@@ -837,12 +899,12 @@ class MigrationWizard:
                 },
                 duration=migration_summary.get("duration", "N/A"),
             )
-            
+
             return success
-            
+
         except KeyboardInterrupt:
-            self.console.print("\n\n[status.warning]Migration interrupted by user.[/status.warning]")
+            self.console.print(f"\n\n  [#fbbf24]Migration interrupted by user.[/]")
             return False
         except Exception as e:
-            self.console.print(f"\n[status.error]Error: {e}[/status.error]")
+            self.console.print(f"\n  [#fb7185]Error: {e}[/]")
             return False

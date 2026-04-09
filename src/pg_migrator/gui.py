@@ -1,392 +1,803 @@
-import customtkinter as ctk
+"""
+InsiderPSQL Universal Migrator – Premium GUI
+A modern, neon-dark themed desktop application built with CustomTkinter.
+Features glassmorphism cards, smooth animations, and a premium aesthetic.
+"""
+
+import math
 import queue
-import threading
-import psycopg2
 import sys
+import threading
+import time
 from tkinter import messagebox
+from typing import Any, Dict, Optional
+from urllib.parse import quote_plus
+
+import customtkinter as ctk
+import psycopg2
 from PIL import Image, ImageDraw, ImageTk
 
-from .migrator import MigrationEngine, MigrationContext
 from .logger import get_logger
+from .migrator import MigrationContext, MigrationEngine, MigrationMethod
 
+# ──────────────────────────────────────────────────────────
+# Neon Dark Theme – matches CLI palette from theme.py
+# ──────────────────────────────────────────────────────────
+NEON = {
+    # Backgrounds
+    "bg_darkest": "#0a0e1a",
+    "bg_dark": "#0f172a",
+    "bg_medium": "#1e293b",
+    "bg_card": "#162033",
+    "bg_input": "#0f172a",
+    "bg_sidebar": "#0c1222",
+
+    # Borders
+    "border": "#334155",
+    "border_glow": "#22d3ee",
+
+    # Primary accents
+    "cyan": "#22d3ee",
+    "teal": "#2dd4bf",
+    "purple": "#a78bfa",
+    "indigo": "#818cf8",
+    "pink": "#f472b6",
+    "lime": "#a3e635",
+
+    # Status
+    "success": "#34d399",
+    "warning": "#fbbf24",
+    "error": "#fb7185",
+    "info": "#60a5fa",
+
+    # Text
+    "text_primary": "#f1f5f9",
+    "text_secondary": "#94a3b8",
+    "text_muted": "#64748b",
+
+    # Version colors
+    "v14": "#fb7185",
+    "v15": "#fbbf24",
+    "v16": "#a3e635",
+    "v17": "#34d399",
+    "v18": "#22d3ee",
+}
+
+# Override CustomTkinter defaults
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
+
+# ──────────────────────────────────────────────────────────
+# Utility: Hex color math
+# ──────────────────────────────────────────────────────────
+def _hex_to_rgb(h: str) -> tuple[int, int, int]:
+    h = h.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _rgb_to_hex(r: int, g: int, b: int) -> str:
+    return f"#{max(0,min(255,r)):02x}{max(0,min(255,g)):02x}{max(0,min(255,b)):02x}"
+
+
+def _lerp_color(c1: str, c2: str, t: float) -> str:
+    """Linearly interpolate between two hex colors."""
+    r1, g1, b1 = _hex_to_rgb(c1)
+    r2, g2, b2 = _hex_to_rgb(c2)
+    return _rgb_to_hex(
+        int(r1 + (r2 - r1) * t),
+        int(g1 + (g2 - g1) * t),
+        int(b1 + (b2 - b1) * t),
+    )
+
+
+# ──────────────────────────────────────────────────────────
+# Main Application
+# ──────────────────────────────────────────────────────────
 class MigratorApp(ctk.CTk):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
-        # 1. Rename Application
         self.title("InsiderPSQL Universal Migrator v1")
-        self.geometry("950x650")
-        self.minsize(900, 600)
+        self.geometry("1050x700")
+        self.minsize(960, 640)
+        self.configure(fg_color=NEON["bg_dark"])
 
-        # Set Custom App Icon
         self._set_app_icon()
 
-        # UI Queues & Logs
-        self.log_queue = queue.Queue()
+        # ── Queues & logging ──
+        self.log_queue: queue.Queue[Any] = queue.Queue()
         self.logger = get_logger()
         self.logger.add_gui_handler(self.log_queue)
 
-        # Animation states
-        self.pulse_state = 0
-        self.pulse_direction = 1
-        self.spinners = {"source": 0, "target": 0}
-        self.spinner_chars = ["|", "/", "-", "\\"]
+        # ── Animation state ──
+        self._pulse_phase: float = 0.0
+        self._indicator_y: float = 0.0
+        self._target_indicator_y: float = 0.0
+        self._page_slide_offset: int = 60
+        self._glow_phase: float = 0.0
+        self._spinner_idx: Dict[str, int] = {"source": 0, "target": 0}
+        self._spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self._connection_status: Dict[str, Optional[str]] = {"source": None, "target": None}
+        self._active_frame: Optional[ctk.CTkFrame] = None
 
-        # Slide animation states
-        self.active_tab_y = 0
-        self.indicator_y = 0
-        self.page_slide_x = 50
+        self.db_versions: Dict[str, Optional[int]] = {"source": None, "target": None}
 
-        self.db_versions = {"source": None, "target": None}
+        # ── Layout ──
+        self.grid_rowconfigure(0, weight=0)  # accent bar
+        self.grid_rowconfigure(1, weight=1)  # content
+        self.grid_columnconfigure(0, weight=0)  # sidebar
+        self.grid_columnconfigure(1, weight=1)  # main
 
-        # Layout styling
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
+        # Top accent gradient bar
+        self._create_accent_bar()
 
-        # Create main layout containers
+        # Sidebar
         self._create_sidebar()
 
-        # Container for main content (pages)
-        self.main_container = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_container.grid(row=0, column=1, sticky="nsew")
+        # Main content area
+        self.main_container = ctk.CTkFrame(
+            self, corner_radius=0, fg_color=NEON["bg_dark"]
+        )
+        self.main_container.grid(row=1, column=1, sticky="nsew")
         self.main_container.grid_rowconfigure(0, weight=1)
         self.main_container.grid_columnconfigure(0, weight=1)
 
-        # Create Pages
-        self.pages = {}
+        # Pages
+        self.pages: Dict[str, ctk.CTkFrame] = {}
         self._create_connection_page()
         self._create_options_page()
         self._create_migration_page()
 
-        # Start loops
+        # Kick off event loops
         self.after(100, self._poll_queue)
-        self.after(100, self._animate_pulse)
+        self.after(40, self._tick_animations)
 
-        # Default open page
+        # Default page
         self.select_page("Connections")
 
-    def _create_raw_logo(self):
-        """Generates the base Pillow image used for logos and icons."""
-        size = 128 # High-res for dock icon
+    # ================================================================
+    # ACCENT BAR  – thin gradient strip at the very top
+    # ================================================================
+    def _create_accent_bar(self) -> None:
+        """Create a 3px gradient accent bar spanning the full width."""
+        bar = ctk.CTkFrame(self, height=3, corner_radius=0, fg_color=NEON["cyan"])
+        bar.grid(row=0, column=0, columnspan=2, sticky="ew")
+
+    # ================================================================
+    # APP ICON
+    # ================================================================
+    def _create_raw_logo(self) -> Image.Image:
+        """Generate the base Pillow image for logos and icons."""
+        size = 128
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        primary = "#38b2ac"
-        accent = "#667eea"
+        primary = NEON["cyan"]
+        accent = NEON["indigo"]
 
-        # Scale coordinates to match size 128
         draw.ellipse([16, 72, 112, 112], fill=accent)
-        draw.ellipse([16, 60, 112, 100], fill=primary, outline="#1a202c", width=4)
-
+        draw.ellipse([16, 60, 112, 100], fill=primary, outline=NEON["bg_dark"], width=4)
         draw.ellipse([16, 44, 112, 84], fill=accent)
-        draw.ellipse([16, 32, 112, 72], fill=primary, outline="#1a202c", width=4)
-
+        draw.ellipse([16, 32, 112, 72], fill=primary, outline=NEON["bg_dark"], width=4)
         draw.ellipse([16, 16, 112, 56], fill=accent)
-        draw.ellipse([16, 4, 112, 44], fill=primary, outline="#1a202c", width=4)
-
+        draw.ellipse([16, 4, 112, 44], fill=primary, outline=NEON["bg_dark"], width=4)
         return img
 
-    def _set_app_icon(self):
-        """Sets the window and OS Dock icon dynamically."""
+    def _set_app_icon(self) -> None:
         raw_img = self._create_raw_logo()
-        # Must keep a reference to PhotoImage to prevent garbage collection
         self._icon_photo = ImageTk.PhotoImage(raw_img)
-
-        # 1. Standard cross-platform window icon
         self.iconphoto(True, self._icon_photo)
-
-        # 2. Specific trick for macOS Dock Icon
         if sys.platform == "darwin":
             try:
-                # Use internal Tk Tcl command to set the dock icon specifically
-                self.tk.call('::tk::mac::iconBitmap', str(self), 128, 128, '-namedImage', str(self._icon_photo))
-            except Exception as e:
-                self.logger.warning(f"Could not set macOS dock icon: {e}")
+                self.tk.call(
+                    "::tk::mac::iconBitmap", str(self), 128, 128,
+                    "-namedImage", str(self._icon_photo),
+                )
+            except Exception:
+                pass
 
-    def _generate_logo(self):
-        """Generates the CTkImage for the sidebar."""
+    def _generate_logo(self) -> ctk.CTkImage:
         img = self._create_raw_logo()
-        return ctk.CTkImage(light_image=img, dark_image=img, size=(48, 48))
+        return ctk.CTkImage(light_image=img, dark_image=img, size=(44, 44))
 
-    def _create_sidebar(self):
-        self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(4, weight=1)
+    # ================================================================
+    # SIDEBAR
+    # ================================================================
+    def _create_sidebar(self) -> None:
+        self.sidebar = ctk.CTkFrame(
+            self, width=220, corner_radius=0, fg_color=NEON["bg_sidebar"],
+            border_width=0,
+        )
+        self.sidebar.grid(row=1, column=0, sticky="nsew")
+        self.sidebar.grid_propagate(False)
+        self.sidebar.grid_rowconfigure(5, weight=1)
+        self.sidebar.grid_columnconfigure(0, weight=1)
 
-        # Logo/Title
+        # Logo + title
+        logo_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        logo_frame.grid(row=0, column=0, padx=16, pady=(24, 8), sticky="ew")
+
         logo_img = self._generate_logo()
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text=" InsiderPSQL\n Migrator v1",
-                                       image=logo_img, compound="left",
-                                       font=ctk.CTkFont(size=18, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 30))
+        ctk.CTkLabel(
+            logo_frame, text="", image=logo_img, compound="left",
+        ).pack(side="left", padx=(4, 10))
 
-        # Sliding Indicator Line
-        self.tab_indicator = ctk.CTkFrame(self.sidebar_frame, width=4, height=40, corner_radius=0, fg_color="#38b2ac")
+        title_frame = ctk.CTkFrame(logo_frame, fg_color="transparent")
+        title_frame.pack(side="left", fill="x")
+        ctk.CTkLabel(
+            title_frame, text="InsiderPSQL",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=NEON["text_primary"],
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            title_frame, text="Migrator v1",
+            font=ctk.CTkFont(size=11),
+            text_color=NEON["text_muted"],
+        ).pack(anchor="w")
 
-        # Navigation Buttons
-        self.nav_btns = {}
-        nav_items = ["Connections", "Options", "Migration"]
+        # Separator
+        sep = ctk.CTkFrame(self.sidebar, height=1, fg_color=NEON["border"])
+        sep.grid(row=1, column=0, sticky="ew", padx=20, pady=(12, 16))
+
+        # Navigation
+        self.nav_btns: Dict[str, ctk.CTkButton] = {}
+        nav_icons = {"Connections": "  ⬡  ", "Options": "  ⚙  ", "Migration": "  ▶  "}
+        nav_items = list(nav_icons.keys())
+
         for i, item in enumerate(nav_items):
-            btn = ctk.CTkButton(self.sidebar_frame, corner_radius=0, height=40, border_spacing=10,
-                                text=item, fg_color="transparent", text_color=("gray10", "gray90"),
-                                hover_color=("gray70", "gray30"), anchor="w",
-                                command=lambda name=item: self.select_page(name))
-            btn.grid(row=i+1, column=0, sticky="ew")
+            btn = ctk.CTkButton(
+                self.sidebar, corner_radius=8, height=42, border_spacing=10,
+                text=f"{nav_icons[item]} {item}", fg_color="transparent",
+                text_color=NEON["text_secondary"],
+                hover_color=NEON["bg_medium"], anchor="w",
+                font=ctk.CTkFont(size=14),
+                command=lambda name=item: self.select_page(name),
+            )
+            btn.grid(row=i + 2, column=0, sticky="ew", padx=12, pady=2)
             self.nav_btns[item] = btn
 
-        # Branding Footer
-        self.footer_label = ctk.CTkLabel(
-            self.sidebar_frame,
-            text="INSIDERTECH 2026\nMuhammad Rizki Perdana Putra",
-            font=ctk.CTkFont(size=10), text_color="gray50"
+        # Sliding indicator (left accent line)
+        self.tab_indicator = ctk.CTkFrame(
+            self.sidebar, width=3, height=36, corner_radius=2,
+            fg_color=NEON["cyan"],
         )
-        self.footer_label.grid(row=5, column=0, pady=(10, 20), sticky="s")
 
-    def select_page(self, name):
-        # Update button colors & trigger animations
+        # Footer
+        footer = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        footer.grid(row=6, column=0, padx=16, pady=(8, 16), sticky="sew")
+
+        sep2 = ctk.CTkFrame(footer, height=1, fg_color=NEON["border"])
+        sep2.pack(fill="x", pady=(0, 10))
+
+        ctk.CTkLabel(
+            footer, text="INSIDERTECH 2026",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color=NEON["text_muted"],
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            footer, text="Muhammad Rizki Perdana Putra",
+            font=ctk.CTkFont(size=9),
+            text_color=NEON["border"],
+        ).pack(anchor="w")
+
+    # ================================================================
+    # PAGE NAVIGATION  (with slide + indicator animations)
+    # ================================================================
+    def select_page(self, name: str) -> None:
         for btn_name, btn in self.nav_btns.items():
             if btn_name == name:
-                btn.configure(fg_color=("gray75", "gray25"))
-
-                # Setup indicator animation target
-                btn.update_idletasks() # Ensure widget coordinates are calculated
-                self.active_tab_y = btn.winfo_y()
+                btn.configure(
+                    fg_color=NEON["bg_medium"],
+                    text_color=NEON["cyan"],
+                )
+                btn.update_idletasks()
+                self._target_indicator_y = float(btn.winfo_y() + 3)
                 self._animate_indicator()
             else:
-                btn.configure(fg_color="transparent")
+                btn.configure(fg_color="transparent", text_color=NEON["text_secondary"])
 
-        # Bring frame to front with slide-in transition
         for page_name, frame in self.pages.items():
             if page_name == name:
-                # Start slide animation
-                self.page_slide_x = 50
-                frame.grid(row=0, column=0, sticky="nsew", padx=(self.page_slide_x, 0))
-                self.active_frame = frame
+                self._page_slide_offset = 50
+                frame.grid(row=0, column=0, sticky="nsew", padx=(self._page_slide_offset, 0))
+                self._active_frame = frame
                 self._animate_page_slide()
             else:
                 frame.grid_forget()
 
-    def _animate_indicator(self):
-        """Smoothly slide the left blue indicator line to the active tab."""
-        diff = self.active_tab_y - self.indicator_y
-
+    def _animate_indicator(self) -> None:
+        diff = self._target_indicator_y - self._indicator_y
         if abs(diff) > 1:
-            self.indicator_y += diff * 0.3 # Ease-out interpolation
-            self.tab_indicator.place(x=0, y=self.indicator_y)
-            self.after(20, self._animate_indicator)
+            self._indicator_y += diff * 0.28
+            self.tab_indicator.place(x=6, y=int(self._indicator_y))
+            self.after(16, self._animate_indicator)
         else:
-            self.indicator_y = self.active_tab_y
-            self.tab_indicator.place(x=0, y=self.indicator_y)
+            self._indicator_y = self._target_indicator_y
+            self.tab_indicator.place(x=6, y=int(self._indicator_y))
 
-    def _animate_page_slide(self):
-        """Smoothly slide the page content in from the right."""
-        if self.page_slide_x > 0:
-            self.page_slide_x = int(self.page_slide_x * 0.6) # Fast ease-out
-            self.active_frame.grid(padx=(self.page_slide_x, 0))
+    def _animate_page_slide(self) -> None:
+        if self._page_slide_offset > 1 and self._active_frame is not None:
+            self._page_slide_offset = int(self._page_slide_offset * 0.55)
+            self._active_frame.grid(padx=(self._page_slide_offset, 0))
             self.after(16, self._animate_page_slide)
-        else:
-            self.active_frame.grid(padx=0)
+        elif self._active_frame is not None:
+            self._active_frame.grid(padx=0)
 
-    # ==========================================
+    # ================================================================
+    # MASTER ANIMATION TICK  (drives pulse / glow / spinners)
+    # ================================================================
+    def _tick_animations(self) -> None:
+        self._pulse_phase += 0.06
+        self._glow_phase += 0.04
+
+        # Button pulse (breathing neon glow)
+        if hasattr(self, "btn_start") and self.btn_start.cget("state") == "normal":
+            t = (math.sin(self._pulse_phase) + 1.0) / 2.0
+            color = _lerp_color(NEON["cyan"], NEON["indigo"], t)
+            self.btn_start.configure(fg_color=color)
+
+        # Progress bar glow during migration
+        if hasattr(self, "progress_bar"):
+            try:
+                val = self.progress_bar.get()
+                if 0 < val < 1:
+                    t = (math.sin(self._glow_phase * 2) + 1.0) / 2.0
+                    bar_color = _lerp_color(NEON["cyan"], NEON["teal"], t)
+                    self.progress_bar.configure(progress_color=bar_color)
+            except Exception:
+                pass
+
+        self.after(40, self._tick_animations)
+
+    # ================================================================
     # PAGE 1: CONNECTIONS
-    # ==========================================
-    def _create_connection_page(self):
+    # ================================================================
+    def _create_connection_page(self) -> None:
         page = ctk.CTkFrame(self.main_container, corner_radius=0, fg_color="transparent")
         page.grid_columnconfigure((0, 1), weight=1)
-        page.grid_rowconfigure(0, weight=1)
+        page.grid_rowconfigure(1, weight=1)
         self.pages["Connections"] = page
 
-        # Source Card
-        source_card = ctk.CTkFrame(page, corner_radius=15)
-        source_card.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
-        ctk.CTkLabel(source_card, text="Source Database", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(20, 15))
+        # Section header
+        header = ctk.CTkFrame(page, fg_color="transparent")
+        header.grid(row=0, column=0, columnspan=2, padx=28, pady=(24, 4), sticky="ew")
+        ctk.CTkLabel(
+            header, text="Database Connections",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color=NEON["text_primary"],
+        ).pack(side="left")
+        ctk.CTkLabel(
+            header, text="Configure source and target PostgreSQL instances",
+            font=ctk.CTkFont(size=12),
+            text_color=NEON["text_muted"],
+        ).pack(side="left", padx=(16, 0))
 
+        # Source card
+        source_card = self._create_glass_card(page)
+        source_card.grid(row=1, column=0, padx=(24, 10), pady=(8, 24), sticky="nsew")
+        self._add_card_header(source_card, "Source Database", NEON["info"], "◀")
         self.source_entries = self._create_db_form(source_card, "source")
 
-        self.btn_test_source = ctk.CTkButton(source_card, text="Test Connection",
-                                            command=lambda: self.test_connection("source"))
-        self.btn_test_source.pack(pady=20)
-        self.lbl_status_source = ctk.CTkLabel(source_card, text="")
-        self.lbl_status_source.pack()
+        btn_frame_src = ctk.CTkFrame(source_card, fg_color="transparent")
+        btn_frame_src.pack(fill="x", padx=24, pady=(16, 4))
 
-        # Target Card
-        target_card = ctk.CTkFrame(page, corner_radius=15)
-        target_card.grid(row=0, column=1, padx=20, pady=20, sticky="nsew")
-        ctk.CTkLabel(target_card, text="Target Database", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(20, 15))
+        self.btn_test_source = ctk.CTkButton(
+            btn_frame_src, text="Test Connection", height=38, corner_radius=8,
+            fg_color=NEON["bg_medium"], hover_color=NEON["border"],
+            border_width=1, border_color=NEON["border"],
+            text_color=NEON["text_primary"],
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=lambda: self.test_connection("source"),
+        )
+        self.btn_test_source.pack(fill="x")
 
+        self.lbl_status_source = ctk.CTkLabel(
+            source_card, text="", font=ctk.CTkFont(size=12),
+            text_color=NEON["text_muted"],
+        )
+        self.lbl_status_source.pack(pady=(6, 16))
+
+        # Target card
+        target_card = self._create_glass_card(page)
+        target_card.grid(row=1, column=1, padx=(10, 24), pady=(8, 24), sticky="nsew")
+        self._add_card_header(target_card, "Target Database", NEON["cyan"], "▶")
         self.target_entries = self._create_db_form(target_card, "target")
 
-        self.btn_test_target = ctk.CTkButton(target_card, text="Test Connection",
-                                            command=lambda: self.test_connection("target"))
-        self.btn_test_target.pack(pady=20)
-        self.lbl_status_target = ctk.CTkLabel(target_card, text="")
-        self.lbl_status_target.pack()
+        btn_frame_tgt = ctk.CTkFrame(target_card, fg_color="transparent")
+        btn_frame_tgt.pack(fill="x", padx=24, pady=(16, 4))
 
-    def _create_db_form(self, parent, prefix):
-        entries = {}
-        fields = [("Host", "localhost"), ("Port", "5432" if prefix=="source" else "5433"),
-                  ("Database", "postgres"), ("User", "postgres"), ("Password", "")]
+        self.btn_test_target = ctk.CTkButton(
+            btn_frame_tgt, text="Test Connection", height=38, corner_radius=8,
+            fg_color=NEON["bg_medium"], hover_color=NEON["border"],
+            border_width=1, border_color=NEON["border"],
+            text_color=NEON["text_primary"],
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=lambda: self.test_connection("target"),
+        )
+        self.btn_test_target.pack(fill="x")
 
-        form_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        form_frame.pack(fill="x", padx=20)
-        form_frame.grid_columnconfigure(1, weight=1)
+        self.lbl_status_target = ctk.CTkLabel(
+            target_card, text="", font=ctk.CTkFont(size=12),
+            text_color=NEON["text_muted"],
+        )
+        self.lbl_status_target.pack(pady=(6, 16))
+
+    def _create_glass_card(self, parent: ctk.CTkBaseClass) -> ctk.CTkFrame:
+        """Create a glassmorphism-style card with subtle border glow."""
+        return ctk.CTkFrame(
+            parent, corner_radius=14,
+            fg_color=NEON["bg_card"],
+            border_width=1,
+            border_color=NEON["border"],
+        )
+
+    def _add_card_header(
+        self, card: ctk.CTkFrame, title: str, accent: str, icon: str
+    ) -> None:
+        """Add a styled header strip to a card."""
+        hdr = ctk.CTkFrame(card, fg_color="transparent")
+        hdr.pack(fill="x", padx=24, pady=(20, 12))
+
+        ctk.CTkLabel(
+            hdr, text=f"  {icon}  {title}",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=accent,
+        ).pack(side="left")
+
+        # Accent dot
+        ctk.CTkLabel(
+            hdr, text="●", font=ctk.CTkFont(size=8),
+            text_color=accent,
+        ).pack(side="right", padx=(0, 4))
+
+    def _create_db_form(
+        self, parent: ctk.CTkFrame, prefix: str
+    ) -> Dict[str, ctk.CTkEntry]:
+        entries: Dict[str, ctk.CTkEntry] = {}
+        fields = [
+            ("Host", "localhost"),
+            ("Port", "5432" if prefix == "source" else "5433"),
+            ("Database", "postgres"),
+            ("User", "postgres"),
+            ("Password", ""),
+        ]
+
+        form = ctk.CTkFrame(parent, fg_color="transparent")
+        form.pack(fill="x", padx=24)
+        form.grid_columnconfigure(1, weight=1)
 
         for i, (label, default) in enumerate(fields):
-            ctk.CTkLabel(form_frame, text=label+":").grid(row=i, column=0, pady=8, sticky="e", padx=(0, 10))
-            show_char = "*" if label == "Password" else ""
-            entry = ctk.CTkEntry(form_frame, show=show_char)
+            ctk.CTkLabel(
+                form, text=f"{label}:", anchor="e",
+                font=ctk.CTkFont(size=12),
+                text_color=NEON["text_secondary"],
+            ).grid(row=i, column=0, pady=5, sticky="e", padx=(0, 12))
+
+            entry = ctk.CTkEntry(
+                form, height=32, corner_radius=6,
+                fg_color=NEON["bg_input"],
+                border_color=NEON["border"],
+                border_width=1,
+                text_color=NEON["text_primary"],
+                placeholder_text_color=NEON["text_muted"],
+                font=ctk.CTkFont(size=12),
+                show="●" if label == "Password" else "",
+            )
             entry.insert(0, default)
-            entry.grid(row=i, column=1, pady=8, sticky="ew")
+            entry.grid(row=i, column=1, pady=5, sticky="ew")
             entries[label.lower()] = entry
 
         return entries
 
-    def _build_dsn(self, prefix):
+    def _build_dsn(self, prefix: str) -> Optional[str]:
         entries = self.source_entries if prefix == "source" else self.target_entries
         host = entries["host"].get()
         port = entries["port"].get()
         db = entries["database"].get()
         user = entries["user"].get()
         password = entries["password"].get()
-
         if not all([host, port, db, user, password]):
             return None
-        return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+        # URL-encode user and password so special chars (@, :, /, #, %) don't break the URI
+        return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{db}"
 
-    # --- Connection Testing Logic & Animations ---
-    def test_connection(self, prefix):
+    # ── Connection testing ──
+    def test_connection(self, prefix: str) -> None:
         dsn = self._build_dsn(prefix)
         btn = self.btn_test_source if prefix == "source" else self.btn_test_target
-        status_lbl = self.lbl_status_source if prefix == "source" else self.lbl_status_target
+        lbl = self.lbl_status_source if prefix == "source" else self.lbl_status_target
 
         if not dsn:
-            status_lbl.configure(text="Please fill all fields", text_color="orange")
+            lbl.configure(text="  ▲  Please fill all fields", text_color=NEON["warning"])
             return
 
-        # Start animation
-        btn.configure(state="disabled", fg_color="gray")
-        status_lbl.configure(text="Connecting...", text_color="white")
-        self.spinners[prefix] = 0
+        btn.configure(state="disabled", fg_color=NEON["bg_dark"], text_color=NEON["text_muted"])
+        lbl.configure(text="  ◉  Connecting...", text_color=NEON["cyan"])
+        self._spinner_idx[prefix] = 0
         self._animate_spinner(prefix)
 
-        # Run test in background
-        def worker():
+        def worker() -> None:
             try:
                 from .detector import detect_version_from_dsn
                 version_info = detect_version_from_dsn(dsn)
-
                 if version_info:
-                    msg = f"Connection Successful (PG {version_info.major}.{version_info.minor})"
+                    msg = f"Connected  ·  PostgreSQL {version_info.major}.{version_info.minor}"
                     self.log_queue.put(("test_result", prefix, True, msg, version_info.major))
                 else:
-                    # Fallback to pure connection test if version parsing failed
                     conn = psycopg2.connect(dsn, connect_timeout=5)
                     conn.close()
-                    self.log_queue.put(("test_result", prefix, True, "Connection Successful (Unknown PG Version)", None))
+                    self.log_queue.put(("test_result", prefix, True, "Connected  ·  Version unknown", None))
             except Exception as e:
-                err_msg = str(e).split('\n')[0]
+                err_msg = str(e).split("\n")[0]
                 self.log_queue.put(("test_result", prefix, False, f"Failed: {err_msg}", None))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _animate_spinner(self, prefix):
+    def _animate_spinner(self, prefix: str) -> None:
         btn = self.btn_test_source if prefix == "source" else self.btn_test_target
-        # Check if we are still disabled (testing is ongoing)
         if btn.cget("state") == "disabled":
-            idx = self.spinners[prefix]
-            char = self.spinner_chars[idx % len(self.spinner_chars)]
-            btn.configure(text=f"Testing {char}")
-            self.spinners[prefix] += 1
-            self.after(150, lambda: self._animate_spinner(prefix))
+            idx = self._spinner_idx[prefix]
+            char = self._spinner_chars[idx % len(self._spinner_chars)]
+            btn.configure(text=f"{char}  Testing...")
+            self._spinner_idx[prefix] += 1
+            self.after(100, lambda: self._animate_spinner(prefix))
 
-    # ==========================================
+    # ================================================================
     # PAGE 2: OPTIONS
-    # ==========================================
-    def _create_options_page(self):
-        page = ctk.CTkFrame(self.main_container, corner_radius=0, fg_color="transparent")
-        page.grid_columnconfigure(0, weight=1)
-        self.pages["Options"] = page
-
-        card = ctk.CTkFrame(page, corner_radius=15)
-        card.grid(row=0, column=0, padx=50, pady=50, sticky="nsew")
-        card.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(card, text="Migration Settings", font=ctk.CTkFont(size=24, weight="bold")).pack(pady=30)
-
-        # Method Dropdown
-        method_frame = ctk.CTkFrame(card, fg_color="transparent")
-        method_frame.pack(pady=20, fill="x", padx=50)
-        ctk.CTkLabel(method_frame, text="Migration Method: ", font=ctk.CTkFont(size=16)).pack(side="left")
-        self.method_var = ctk.StringVar(value="dump_restore")
-        self.method_menu = ctk.CTkOptionMenu(method_frame, values=["dump_restore", "pg_upgrade", "python"], variable=self.method_var, width=200)
-        self.method_menu.pack(side="right")
-
-        # Dry Run Checkbox
-        self.dry_run_var = ctk.BooleanVar(value=False)
-        self.dry_run_checkbox = ctk.CTkCheckBox(card, text="Dry Run (Perform checks only, do not migrate data)", variable=self.dry_run_var, font=ctk.CTkFont(size=16))
-        self.dry_run_checkbox.pack(pady=30)
-
-
-    # ==========================================
-    # PAGE 3: MIGRATION & LOGS
-    # ==========================================
-    def _create_migration_page(self):
+    # ================================================================
+    def _create_options_page(self) -> None:
         page = ctk.CTkFrame(self.main_container, corner_radius=0, fg_color="transparent")
         page.grid_columnconfigure(0, weight=1)
         page.grid_rowconfigure(1, weight=1)
+        self.pages["Options"] = page
+
+        # Header
+        header = ctk.CTkFrame(page, fg_color="transparent")
+        header.grid(row=0, column=0, padx=28, pady=(24, 4), sticky="ew")
+        ctk.CTkLabel(
+            header, text="Migration Settings",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color=NEON["text_primary"],
+        ).pack(side="left")
+        ctk.CTkLabel(
+            header, text="Configure how the migration will be performed",
+            font=ctk.CTkFont(size=12),
+            text_color=NEON["text_muted"],
+        ).pack(side="left", padx=(16, 0))
+
+        # Settings card
+        card = self._create_glass_card(page)
+        card.grid(row=1, column=0, padx=24, pady=(8, 24), sticky="nsew")
+        card.grid_columnconfigure(0, weight=1)
+
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=40, pady=30)
+        inner.grid_columnconfigure(1, weight=1)
+
+        # ── Method ──
+        ctk.CTkLabel(
+            inner, text="Migration Method",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=NEON["cyan"],
+        ).grid(row=0, column=0, sticky="w", pady=(0, 4))
+        ctk.CTkLabel(
+            inner, text="Strategy used to transfer data between instances",
+            font=ctk.CTkFont(size=11),
+            text_color=NEON["text_muted"],
+        ).grid(row=1, column=0, sticky="w", pady=(0, 12))
+
+        self.method_var = ctk.StringVar(value="dump_restore")
+        self.method_menu = ctk.CTkOptionMenu(
+            inner, values=["dump_restore", "pg_upgrade", "python"],
+            variable=self.method_var, width=240, height=36,
+            corner_radius=8,
+            fg_color=NEON["bg_input"],
+            button_color=NEON["border"],
+            button_hover_color=NEON["bg_medium"],
+            dropdown_fg_color=NEON["bg_card"],
+            dropdown_hover_color=NEON["bg_medium"],
+            text_color=NEON["text_primary"],
+            font=ctk.CTkFont(size=13),
+        )
+        self.method_menu.grid(row=0, column=1, rowspan=2, sticky="e", padx=(20, 0))
+
+        # Divider
+        ctk.CTkFrame(inner, height=1, fg_color=NEON["border"]).grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=20,
+        )
+
+        # ── Dry run ──
+        ctk.CTkLabel(
+            inner, text="Dry Run Mode",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=NEON["cyan"],
+        ).grid(row=3, column=0, sticky="w", pady=(0, 4))
+        ctk.CTkLabel(
+            inner, text="Perform analysis and checks without modifying data",
+            font=ctk.CTkFont(size=11),
+            text_color=NEON["text_muted"],
+        ).grid(row=4, column=0, sticky="w", pady=(0, 4))
+
+        self.dry_run_var = ctk.BooleanVar(value=False)
+        self.dry_run_switch = ctk.CTkSwitch(
+            inner, text="", variable=self.dry_run_var,
+            onvalue=True, offvalue=False,
+            progress_color=NEON["cyan"],
+            button_color=NEON["text_secondary"],
+            button_hover_color=NEON["text_primary"],
+            fg_color=NEON["border"],
+        )
+        self.dry_run_switch.grid(row=3, column=1, rowspan=2, sticky="e", padx=(20, 0))
+
+        # Divider
+        ctk.CTkFrame(inner, height=1, fg_color=NEON["border"]).grid(
+            row=5, column=0, columnspan=2, sticky="ew", pady=20,
+        )
+
+        # ── Info cards ──
+        info_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        info_frame.grid(row=6, column=0, columnspan=2, sticky="ew")
+        info_frame.grid_columnconfigure((0, 1, 2), weight=1)
+
+        method_info = [
+            ("dump_restore", "Most reliable. Uses pg_dump/pg_restore.", NEON["info"]),
+            ("pg_upgrade", "Fast in-place upgrade between versions.", NEON["teal"]),
+            ("python", "Pure Python row-level copy. Flexible.", NEON["purple"]),
+        ]
+        for i, (name, desc, color) in enumerate(method_info):
+            info_card = ctk.CTkFrame(
+                info_frame, corner_radius=10, fg_color=NEON["bg_dark"],
+                border_width=1, border_color=NEON["border"],
+            )
+            info_card.grid(row=0, column=i, padx=(0 if i == 0 else 6, 0), sticky="nsew")
+            ctk.CTkLabel(
+                info_card, text=name, font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=color,
+            ).pack(padx=12, pady=(10, 4), anchor="w")
+            ctk.CTkLabel(
+                info_card, text=desc, font=ctk.CTkFont(size=10),
+                text_color=NEON["text_muted"], wraplength=200, justify="left",
+            ).pack(padx=12, pady=(0, 10), anchor="w")
+
+    # ================================================================
+    # PAGE 3: MIGRATION & LOGS
+    # ================================================================
+    def _create_migration_page(self) -> None:
+        page = ctk.CTkFrame(self.main_container, corner_radius=0, fg_color="transparent")
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(2, weight=1)
         self.pages["Migration"] = page
 
-        # Top Control Area
-        control_frame = ctk.CTkFrame(page, fg_color="transparent")
-        control_frame.grid(row=0, column=0, padx=20, pady=20, sticky="ew")
+        # Header
+        header = ctk.CTkFrame(page, fg_color="transparent")
+        header.grid(row=0, column=0, padx=28, pady=(24, 12), sticky="ew")
+        ctk.CTkLabel(
+            header, text="Migration",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color=NEON["text_primary"],
+        ).pack(side="left")
 
-        self.btn_start = ctk.CTkButton(control_frame, text="🚀 START MIGRATION", font=ctk.CTkFont(size=16, weight="bold"), height=50, command=self.start_migration)
+        self.btn_start = ctk.CTkButton(
+            header, text="  ▶  START MIGRATION",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            height=44, corner_radius=10,
+            fg_color=NEON["cyan"],
+            hover_color=NEON["teal"],
+            text_color=NEON["bg_dark"],
+            command=self.start_migration,
+        )
         self.btn_start.pack(side="right")
-        self.base_color = self.btn_start.cget("fg_color") # Store for pulsing
 
-        self.progress_bar = ctk.CTkProgressBar(control_frame)
-        self.progress_bar.pack(side="left", fill="x", expand=True, padx=(0, 20))
+        # Progress area
+        progress_card = ctk.CTkFrame(
+            page, corner_radius=10, fg_color=NEON["bg_card"],
+            border_width=1, border_color=NEON["border"],
+        )
+        progress_card.grid(row=1, column=0, padx=24, pady=(0, 8), sticky="ew")
+
+        progress_inner = ctk.CTkFrame(progress_card, fg_color="transparent")
+        progress_inner.pack(fill="x", padx=20, pady=14)
+
+        self.lbl_progress_status = ctk.CTkLabel(
+            progress_inner, text="Ready",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=NEON["text_secondary"],
+        )
+        self.lbl_progress_status.pack(anchor="w")
+
+        self.progress_bar = ctk.CTkProgressBar(
+            progress_inner, height=8, corner_radius=4,
+            fg_color=NEON["bg_dark"],
+            progress_color=NEON["cyan"],
+            border_width=0,
+        )
+        self.progress_bar.pack(fill="x", pady=(8, 4))
         self.progress_bar.set(0)
 
-        # Terminal/Logs Area
-        log_frame = ctk.CTkFrame(page)
-        log_frame.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="nsew")
-        log_frame.grid_columnconfigure(0, weight=1)
-        log_frame.grid_rowconfigure(0, weight=1)
+        self.lbl_progress_pct = ctk.CTkLabel(
+            progress_inner, text="0%",
+            font=ctk.CTkFont(size=11),
+            text_color=NEON["text_muted"],
+        )
+        self.lbl_progress_pct.pack(anchor="e")
 
-        self.log_textbox = ctk.CTkTextbox(log_frame, state="disabled", font=ctk.CTkFont(family="monospace", size=13))
-        self.log_textbox.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        # Log terminal
+        log_card = ctk.CTkFrame(
+            page, corner_radius=10, fg_color=NEON["bg_card"],
+            border_width=1, border_color=NEON["border"],
+        )
+        log_card.grid(row=2, column=0, padx=24, pady=(0, 24), sticky="nsew")
+        log_card.grid_rowconfigure(1, weight=1)
+        log_card.grid_columnconfigure(0, weight=1)
 
-    def _animate_pulse(self):
-        # Only pulse the start button if it's not disabled
-        if self.btn_start.cget("state") == "normal":
-            # Simple color interpolation for a breathing effect
-            # Assuming default blue theme base color is around #3B8ED0 (RGB: 59, 142, 208)
-            # We will shift slightly brighter and darker
-            r = 59 + int(15 * self.pulse_state)
-            g = 142 + int(15 * self.pulse_state)
-            b = 208 + int(15 * self.pulse_state)
+        # Terminal header bar
+        term_header = ctk.CTkFrame(log_card, height=32, fg_color=NEON["bg_medium"], corner_radius=0)
+        term_header.grid(row=0, column=0, sticky="ew")
+        term_header.grid_propagate(False)
 
-            hex_color = f"#{r:02x}{g:02x}{b:02x}"
-            self.btn_start.configure(fg_color=hex_color)
+        # Traffic light dots
+        dot_frame = ctk.CTkFrame(term_header, fg_color="transparent")
+        dot_frame.pack(side="left", padx=12)
+        for color in [NEON["error"], NEON["warning"], NEON["success"]]:
+            ctk.CTkLabel(
+                dot_frame, text="●", font=ctk.CTkFont(size=9),
+                text_color=color,
+            ).pack(side="left", padx=2)
 
-            self.pulse_state += 0.05 * self.pulse_direction
-            if self.pulse_state >= 1.0 or self.pulse_state <= 0.0:
-                self.pulse_direction *= -1
+        ctk.CTkLabel(
+            term_header, text="Migration Log",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=NEON["text_muted"],
+        ).pack(side="left", padx=(12, 0))
 
-        self.after(50, self._animate_pulse)
+        self.log_textbox = ctk.CTkTextbox(
+            log_card, state="disabled",
+            font=ctk.CTkFont(family="Menlo, Consolas, monospace", size=12),
+            fg_color=NEON["bg_darkest"],
+            text_color=NEON["text_secondary"],
+            corner_radius=0,
+            border_width=0,
+        )
+        self.log_textbox.grid(row=1, column=0, padx=2, pady=(0, 2), sticky="nsew")
 
-    # --- Core Execution Logic ---
-    def _append_log(self, text, level="INFO"):
+    # ================================================================
+    # LOG HELPERS
+    # ================================================================
+    def _append_log(self, text: str, level: str = "INFO") -> None:
+        """Append a line to the log terminal with level-based coloring."""
         self.log_textbox.configure(state="normal")
-        self.log_textbox.insert("end", f"{text}\n")
+
+        # Timestamp prefix
+        ts = time.strftime("%H:%M:%S")
+        prefix = f"[{ts}] "
+
+        # Tag for color-coding (CustomTkinter textbox supports tags)
+        tag = level.lower()
+
+        # Configure tags if not done yet
+        color_map = {
+            "info": NEON["text_secondary"],
+            "warning": NEON["warning"],
+            "error": NEON["error"],
+            "success": NEON["success"],
+            "progress": NEON["cyan"],
+        }
+        tag_color = color_map.get(tag, NEON["text_secondary"])
+
+        try:
+            self.log_textbox._textbox.tag_configure(tag, foreground=tag_color)
+        except Exception:
+            pass
+
+        self.log_textbox.insert("end", f"{prefix}{text}\n", tag)
         self.log_textbox.see("end")
         self.log_textbox.configure(state="disabled")
 
-    def _poll_queue(self):
+    # ================================================================
+    # QUEUE POLLING
+    # ================================================================
+    def _poll_queue(self) -> None:
         try:
             while True:
                 msg = self.log_queue.get_nowait()
@@ -399,72 +810,122 @@ class MigratorApp(ctk.CTk):
                 elif msg_type == "progress":
                     _, pct, text = msg
                     self.progress_bar.set(pct / 100.0)
-                    self._append_log(f"[Progress {pct:.1f}%] {text}")
+                    self.lbl_progress_pct.configure(text=f"{pct:.1f}%")
+                    self.lbl_progress_status.configure(
+                        text=text, text_color=NEON["cyan"],
+                    )
+                    self._append_log(f"[{pct:.1f}%] {text}", "progress")
 
                 elif msg_type == "done":
                     _, success = msg
-                    self.btn_start.configure(state="normal", fg_color=self.base_color, text="🚀 START MIGRATION")
-                    status = "successfully completed" if success else "failed"
-                    messagebox.showinfo("Migration Finished", f"Migration has {status}.")
+                    self.btn_start.configure(
+                        state="normal",
+                        fg_color=NEON["cyan"],
+                        text_color=NEON["bg_dark"],
+                        text="  ▶  START MIGRATION",
+                    )
+                    if success:
+                        self.progress_bar.configure(progress_color=NEON["success"])
+                        self.progress_bar.set(1.0)
+                        self.lbl_progress_pct.configure(text="100%")
+                        self.lbl_progress_status.configure(
+                            text="Migration completed successfully",
+                            text_color=NEON["success"],
+                        )
+                        self._append_log("Migration completed successfully!", "success")
+                        messagebox.showinfo("Migration Finished", "Migration has successfully completed.")
+                    else:
+                        self.progress_bar.configure(progress_color=NEON["error"])
+                        self.lbl_progress_status.configure(
+                            text="Migration failed",
+                            text_color=NEON["error"],
+                        )
+                        self._append_log("Migration failed.", "error")
+                        messagebox.showinfo("Migration Finished", "Migration has failed.")
 
                 elif msg_type == "test_result":
                     _, prefix, success, message, major_version = msg
                     btn = self.btn_test_source if prefix == "source" else self.btn_test_target
-                    status_lbl = self.lbl_status_source if prefix == "source" else self.lbl_status_target
+                    lbl = self.lbl_status_source if prefix == "source" else self.lbl_status_target
 
                     btn.configure(state="normal", text="Test Connection")
                     if success:
-                        btn.configure(fg_color="green")
-                        status_lbl.configure(text=message, text_color="green")
+                        btn.configure(
+                            fg_color=NEON["success"],
+                            text_color=NEON["bg_dark"],
+                            hover_color=NEON["success"],
+                        )
+                        lbl.configure(
+                            text=f"  ✓  {message}",
+                            text_color=NEON["success"],
+                        )
                         self.db_versions[prefix] = major_version
+                        self._connection_status[prefix] = "success"
                     else:
-                        btn.configure(fg_color="red")
-                        status_lbl.configure(text=message, text_color="red")
+                        btn.configure(
+                            fg_color=NEON["error"],
+                            text_color=NEON["bg_dark"],
+                            hover_color=NEON["error"],
+                        )
+                        lbl.configure(
+                            text=f"  ✗  {message}",
+                            text_color=NEON["error"],
+                        )
                         self.db_versions[prefix] = None
+                        self._connection_status[prefix] = "error"
 
         except queue.Empty:
             pass
         finally:
-            self.after(100, self._poll_queue)
+            self.after(80, self._poll_queue)
 
-    def start_migration(self):
+    # ================================================================
+    # MIGRATION EXECUTION
+    # ================================================================
+    def start_migration(self) -> None:
         source_dsn = self._build_dsn("source")
         target_dsn = self._build_dsn("target")
 
         if not source_dsn or not target_dsn:
-            messagebox.showerror("Error", "Please fill in all database connection fields on the Connections page.")
+            messagebox.showerror(
+                "Error",
+                "Please fill in all database connection fields on the Connections page.",
+            )
             self.select_page("Connections")
             return
 
-        # Pre-Migration Version Validation
+        # Version validation
         src_ver = self.db_versions.get("source")
         tgt_ver = self.db_versions.get("target")
 
-        # Fallback to fetch version if they didn't click "Test Connection"
         if src_ver is None or tgt_ver is None:
             try:
                 from .detector import detect_version_from_dsn
                 src_info = detect_version_from_dsn(source_dsn)
                 tgt_info = detect_version_from_dsn(target_dsn)
-
                 if not src_info or not tgt_info:
-                    messagebox.showerror("Validation Error", "Could not connect to databases to verify PostgreSQL versions.")
+                    messagebox.showerror(
+                        "Validation Error",
+                        "Could not connect to databases to verify PostgreSQL versions.",
+                    )
                     self.select_page("Connections")
                     return
-
                 src_ver = src_info.major
                 tgt_ver = tgt_info.major
                 self.db_versions["source"] = src_ver
                 self.db_versions["target"] = tgt_ver
             except Exception as e:
-                messagebox.showerror("Validation Error", f"Failed to verify PG versions: {str(e)}")
+                messagebox.showerror(
+                    "Validation Error",
+                    f"Failed to verify PG versions: {e}",
+                )
                 self.select_page("Connections")
                 return
 
         if src_ver > tgt_ver:
             messagebox.showerror(
                 "Migration Blocked",
-                f"Cannot migrate from a higher PG version ({src_ver}) to a lower PG version ({tgt_ver})."
+                f"Cannot migrate from PG {src_ver} to PG {tgt_ver} (higher to lower).",
             )
             self.select_page("Connections")
             return
@@ -475,28 +936,39 @@ class MigratorApp(ctk.CTk):
         context = MigrationContext(
             source_dsn=source_dsn,
             target_dsn=target_dsn,
-            migration_method=method,
-            dry_run=dry_run
+            method=MigrationMethod(method),
+            dry_run=dry_run,
         )
 
-        def progress_callback(text: str, pct: float):
+        def progress_callback(text: str, pct: float) -> None:
             self.log_queue.put(("progress", pct, text))
 
         engine = MigrationEngine(context, progress_callback=progress_callback)
 
-        self.btn_start.configure(state="disabled", fg_color="gray", text="MIGRATING...")
+        # Reset UI
+        self.btn_start.configure(
+            state="disabled",
+            fg_color=NEON["bg_medium"],
+            text_color=NEON["text_muted"],
+            text="  ◉  MIGRATING...",
+        )
+        self.progress_bar.configure(progress_color=NEON["cyan"])
         self.progress_bar.set(0)
+        self.lbl_progress_pct.configure(text="0%")
+        self.lbl_progress_status.configure(
+            text="Starting migration...", text_color=NEON["cyan"],
+        )
         self.log_textbox.configure(state="normal")
         self.log_textbox.delete("1.0", "end")
         self.log_textbox.configure(state="disabled")
-        self._append_log("Starting migration process...")
+        self._append_log("Starting migration process...", "info")
 
-        def run_worker():
+        def run_worker() -> None:
             try:
                 success = engine.run()
                 self.log_queue.put(("done", success))
             except Exception as e:
-                self.log_queue.put(("log", "ERROR", f"Unhandled exception: {str(e)}"))
+                self.log_queue.put(("log", "ERROR", f"Unhandled exception: {e}"))
                 self.log_queue.put(("done", False))
 
         threading.Thread(target=run_worker, daemon=True).start()

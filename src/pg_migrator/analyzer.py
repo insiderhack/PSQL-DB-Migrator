@@ -5,8 +5,10 @@ Detects breaking changes, deprecations, and migration opportunities.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 import psycopg2
+from psycopg2.extensions import connection
 
 
 class IssueSeverity(Enum):
@@ -38,7 +40,7 @@ class CompatibilityIssue:
     details: Optional[str] = None
     auto_fixable: bool = False
     pg_version_affected: Optional[List[int]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for UI display."""
         return {
@@ -61,23 +63,23 @@ class AnalysisResult:
     schemas_analyzed: int = 0
     tables_analyzed: int = 0
     extensions_analyzed: int = 0
-    
+
     @property
     def critical_count(self) -> int:
         return sum(1 for i in self.issues if i.severity == IssueSeverity.CRITICAL)
-    
+
     @property
     def warning_count(self) -> int:
         return sum(1 for i in self.issues if i.severity == IssueSeverity.WARNING)
-    
+
     @property
     def info_count(self) -> int:
         return sum(1 for i in self.issues if i.severity == IssueSeverity.INFO)
-    
+
     @property
     def has_blockers(self) -> bool:
         return self.critical_count > 0
-    
+
     def get_summary(self) -> Dict[str, Any]:
         """Get analysis summary."""
         return {
@@ -92,17 +94,25 @@ class AnalysisResult:
             "can_proceed": not self.has_blockers,
         }
 
+    def to_report_dict(self) -> Dict[str, Any]:
+        """Convert result to a comprehensive report dictionary."""
+        return {
+            "summary": self.get_summary(),
+            "issues": [i.to_dict() for i in self.issues],
+            "opportunities": [i.to_dict() for i in self.opportunities],
+        }
+
 
 class CompatibilityAnalyzer:
     """Analyzes PostgreSQL databases for migration compatibility."""
-    
+
     # Known deprecated features by version
     DEPRECATIONS = {
         18: [
             ("MD5 authentication", "Switch to SCRAM-SHA-256 authentication"),
         ]
     }
-    
+
     # Breaking changes by source -> target version
     BREAKING_CHANGES = {
         (14, 18): [
@@ -119,7 +129,7 @@ class CompatibilityAnalyzer:
             ("Time zone abbreviation handling changed", "Review timezone-related queries"),
         ],
     }
-    
+
     # Extensions that may need attention
     EXTENSION_NOTES = {
         "postgis": "Ensure PostGIS is compatible with PG18",
@@ -127,7 +137,7 @@ class CompatibilityAnalyzer:
         "pgcrypto": "MD5-based functions deprecated, use SHA variants",
         "timescaledb": "Check TimescaleDB PG18 compatibility",
     }
-    
+
     def __init__(self, dsn: str, source_version: int):
         """
         Initialize analyzer.
@@ -138,8 +148,8 @@ class CompatibilityAnalyzer:
         """
         self.dsn = dsn
         self.source_version = source_version
-        self._connection = None
-    
+        self._connection: Optional[connection] = None
+
     def connect(self) -> bool:
         """Establish database connection."""
         try:
@@ -147,13 +157,13 @@ class CompatibilityAnalyzer:
             return True
         except Exception:
             return False
-    
+
     def disconnect(self):
         """Close database connection."""
         if self._connection:
             self._connection.close()
             self._connection = None
-    
+
     def analyze(self) -> AnalysisResult:
         """
         Run full compatibility analysis.
@@ -162,9 +172,9 @@ class CompatibilityAnalyzer:
             AnalysisResult with all findings
         """
         result = AnalysisResult(source_version=self.source_version)
-        
+
         if not self._connection:
-            if not self.connect():
+            if not self.connect() or not self._connection:
                 result.issues.append(CompatibilityIssue(
                     severity=IssueSeverity.CRITICAL,
                     category=IssueCategory.CONFIGURATION,
@@ -172,7 +182,7 @@ class CompatibilityAnalyzer:
                     recommendation="Verify connection parameters and database availability",
                 ))
                 return result
-        
+
         # Run all checks
         self._check_authentication(result)
         self._check_breaking_changes(result)
@@ -181,11 +191,14 @@ class CompatibilityAnalyzer:
         self._check_schemas(result)
         self._check_data_types(result)
         self._check_opportunities(result)
-        
+
         return result
-    
+
     def _check_authentication(self, result: AnalysisResult):
         """Check for authentication-related issues."""
+        if not self._connection:
+            return
+
         try:
             with self._connection.cursor() as cursor:
                 # Check for MD5 password users
@@ -193,8 +206,9 @@ class CompatibilityAnalyzer:
                     SELECT count(*) FROM pg_catalog.pg_authid 
                     WHERE rolpassword LIKE 'md5%'
                 """)
-                md5_count = cursor.fetchone()[0]
-                
+                res = cursor.fetchone()
+                md5_count = res[0] if res else 0
+
                 if md5_count > 0:
                     result.issues.append(CompatibilityIssue(
                         severity=IssueSeverity.WARNING,
@@ -206,7 +220,7 @@ class CompatibilityAnalyzer:
                     ))
         except Exception:
             pass  # May not have permission to check
-    
+
     def _check_breaking_changes(self, result: AnalysisResult):
         """Check for known breaking changes."""
         for (src, tgt), changes in self.BREAKING_CHANGES.items():
@@ -219,7 +233,7 @@ class CompatibilityAnalyzer:
                         recommendation=recommendation,
                         pg_version_affected=[src],
                     ))
-    
+
     def _check_deprecations(self, result: AnalysisResult):
         """Check for deprecated features."""
         for version, deprecations in self.DEPRECATIONS.items():
@@ -231,9 +245,12 @@ class CompatibilityAnalyzer:
                         message=f"Deprecated: {feature}",
                         recommendation=recommendation,
                     ))
-    
+
     def _check_extensions(self, result: AnalysisResult):
         """Check installed extensions."""
+        if not self._connection:
+            return
+            
         try:
             with self._connection.cursor() as cursor:
                 cursor.execute("""
@@ -243,7 +260,7 @@ class CompatibilityAnalyzer:
                 """)
                 extensions = cursor.fetchall()
                 result.extensions_analyzed = len(extensions)
-                
+
                 for ext_name, ext_version in extensions:
                     if ext_name in self.EXTENSION_NOTES:
                         result.issues.append(CompatibilityIssue(
@@ -254,9 +271,12 @@ class CompatibilityAnalyzer:
                         ))
         except Exception:
             pass
-    
+
     def _check_schemas(self, result: AnalysisResult):
         """Check schema structure."""
+        if not self._connection:
+            return
+
         try:
             with self._connection.cursor() as cursor:
                 # Count schemas
@@ -265,8 +285,9 @@ class CompatibilityAnalyzer:
                     WHERE schema_name NOT LIKE 'pg_%' 
                     AND schema_name != 'information_schema'
                 """)
-                result.schemas_analyzed = cursor.fetchone()[0]
-                
+                res_schemas = cursor.fetchone()
+                result.schemas_analyzed = res_schemas[0] if res_schemas else 0
+
                 # Count tables
                 cursor.execute("""
                     SELECT count(*) FROM information_schema.tables 
@@ -274,12 +295,16 @@ class CompatibilityAnalyzer:
                     AND table_schema != 'information_schema'
                     AND table_type = 'BASE TABLE'
                 """)
-                result.tables_analyzed = cursor.fetchone()[0]
+                res_tables = cursor.fetchone()
+                result.tables_analyzed = res_tables[0] if res_tables else 0
         except Exception:
             pass
-    
+
     def _check_data_types(self, result: AnalysisResult):
         """Check for data type considerations."""
+        if not self._connection:
+            return
+
         try:
             with self._connection.cursor() as cursor:
                 # Check for UUID columns (opportunity for UUIDv7)
@@ -288,8 +313,9 @@ class CompatibilityAnalyzer:
                     WHERE data_type = 'uuid'
                     AND table_schema NOT LIKE 'pg_%'
                 """)
-                uuid_count = cursor.fetchone()[0]
-                
+                res_uuid = cursor.fetchone()
+                uuid_count = res_uuid[0] if res_uuid else 0
+
                 if uuid_count > 0:
                     result.opportunities.append(CompatibilityIssue(
                         severity=IssueSeverity.INFO,
@@ -300,7 +326,7 @@ class CompatibilityAnalyzer:
                     ))
         except Exception:
             pass
-    
+
     def _check_opportunities(self, result: AnalysisResult):
         """Check for migration opportunities and optimizations."""
         # Always suggest these PG18 features
@@ -310,25 +336,25 @@ class CompatibilityAnalyzer:
             message="Async I/O subsystem available",
             recommendation="Enable AIO for 2-3x read performance improvement",
         ))
-        
+
         result.opportunities.append(CompatibilityIssue(
             severity=IssueSeverity.INFO,
             category=IssueCategory.OPPORTUNITY,
             message="Planner statistics preserved during upgrade",
             recommendation="No post-upgrade ANALYZE needed with pg_upgrade",
         ))
-        
+
         result.opportunities.append(CompatibilityIssue(
             severity=IssueSeverity.INFO,
             category=IssueCategory.OPPORTUNITY,
             message="Data checksums enabled by default",
             recommendation="Verify data integrity with built-in checksums",
         ))
-    
+
     def __enter__(self):
         self.connect()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
         return False
@@ -346,4 +372,5 @@ def analyze_compatibility(dsn: str, source_version: int) -> AnalysisResult:
         AnalysisResult
     """
     with CompatibilityAnalyzer(dsn, source_version) as analyzer:
-        return analyzer.analyze()
+        res = analyzer.analyze()
+        return res

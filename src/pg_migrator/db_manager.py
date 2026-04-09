@@ -3,13 +3,14 @@ Database management utilities for PostgreSQL Migrator.
 Handles creating, dropping, and preparing databases for migration.
 """
 
+from typing import Optional, Tuple
+
 import psycopg2
 from psycopg2 import sql
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-from typing import Tuple, Optional, Dict, Any
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT, connection
 
-from .utils import parse_dsn, build_dsn
 from .logger import get_logger
+from .utils import build_dsn, parse_dsn
 
 
 class DatabaseManager:
@@ -17,7 +18,7 @@ class DatabaseManager:
     Manages PostgreSQL database creation and deletion.
     Connects to the postgres system database to perform operations.
     """
-    
+
     def __init__(
         self,
         host: str = "localhost",
@@ -39,8 +40,8 @@ class DatabaseManager:
         self.user = user
         self.password = password
         self.logger = get_logger()
-        self._connection = None
-    
+        self._connection: Optional[connection] = None
+
     def _get_system_dsn(self) -> str:
         """Get DSN for postgres system database."""
         return build_dsn(
@@ -50,7 +51,7 @@ class DatabaseManager:
             user=self.user,
             password=self.password,
         )
-    
+
     def _connect_system(self) -> bool:
         """Connect to postgres system database."""
         try:
@@ -60,13 +61,13 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Cannot connect to system database: {e}")
             return False
-    
+
     def _disconnect(self):
         """Disconnect from database."""
         if self._connection:
             self._connection.close()
             self._connection = None
-    
+
     def database_exists(self, dbname: str) -> bool:
         """
         Check if a database exists.
@@ -79,9 +80,9 @@ class DatabaseManager:
         """
         try:
             if not self._connection:
-                if not self._connect_system():
+                if not self._connect_system() or not self._connection:
                     return False
-            
+
             with self._connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT 1 FROM pg_database WHERE datname = %s",
@@ -91,7 +92,7 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Error checking database existence: {e}")
             return False
-    
+
     def create_database(
         self,
         dbname: str,
@@ -113,11 +114,11 @@ class DatabaseManager:
         """
         try:
             if not self._connection:
-                if not self._connect_system():
+                if not self._connect_system() or not self._connection:
                     return False, "Cannot connect to system database"
-            
+
             owner = owner or self.user
-            
+
             with self._connection.cursor() as cursor:
                 # Build CREATE DATABASE query
                 query = sql.SQL(
@@ -128,18 +129,18 @@ class DatabaseManager:
                     encoding=sql.Literal(encoding),
                     template=sql.Identifier(template),
                 )
-                
+
                 cursor.execute(query)
-            
+
             self.logger.success(f"Database '{dbname}' created successfully")
             return True, f"Database '{dbname}' created"
-            
+
         except psycopg2.errors.DuplicateDatabase:
             return False, f"Database '{dbname}' already exists"
         except Exception as e:
             self.logger.error(f"Error creating database: {e}")
             return False, str(e)
-    
+
     def drop_database(self, dbname: str, force: bool = True) -> Tuple[bool, str]:
         """
         Drop an existing database.
@@ -153,13 +154,13 @@ class DatabaseManager:
         """
         try:
             if not self._connection:
-                if not self._connect_system():
+                if not self._connect_system() or not self._connection:
                     return False, "Cannot connect to system database"
-            
+
             # Safety check - don't drop system databases
             if dbname.lower() in ("postgres", "template0", "template1"):
                 return False, f"Cannot drop system database '{dbname}'"
-            
+
             with self._connection.cursor() as cursor:
                 # Terminate existing connections if force is True
                 if force:
@@ -172,22 +173,22 @@ class DatabaseManager:
                         (dbname,)
                     )
                     self.logger.info(f"Terminated active connections to '{dbname}'")
-                
+
                 # Drop the database
                 query = sql.SQL("DROP DATABASE IF EXISTS {dbname}").format(
                     dbname=sql.Identifier(dbname)
                 )
                 cursor.execute(query)
-            
+
             self.logger.success(f"Database '{dbname}' dropped successfully")
             return True, f"Database '{dbname}' dropped"
-            
+
         except psycopg2.errors.ObjectInUse:
             return False, f"Database '{dbname}' is in use. Close all connections first."
         except Exception as e:
             self.logger.error(f"Error dropping database: {e}")
             return False, str(e)
-    
+
     def clear_database_content(self, dbname: str) -> Tuple[bool, str]:
         """
         Clear all content from a database without dropping the database itself.
@@ -208,10 +209,10 @@ class DatabaseManager:
                 user=self.user,
                 password=self.password,
             )
-            
+
             target_conn = psycopg2.connect(target_dsn)
             target_conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-            
+
             with target_conn.cursor() as cursor:
                 # Get all user schemas (excluding system schemas)
                 cursor.execute("""
@@ -222,7 +223,7 @@ class DatabaseManager:
                     AND schema_name NOT LIKE 'pg_toast_temp_%'
                 """)
                 schemas = [row[0] for row in cursor.fetchall()]
-                
+
                 # Drop each schema with CASCADE
                 for schema in schemas:
                     self.logger.info(f"Dropping schema '{schema}'...")
@@ -231,20 +232,20 @@ class DatabaseManager:
                             sql.Identifier(schema)
                         )
                     )
-                
+
                 # Recreate public schema
                 cursor.execute("CREATE SCHEMA IF NOT EXISTS public")
                 cursor.execute("GRANT ALL ON SCHEMA public TO PUBLIC")
-                
+
             target_conn.close()
-            
+
             self.logger.success(f"Database '{dbname}' content cleared successfully")
             return True, f"Database '{dbname}' content cleared"
-            
+
         except Exception as e:
             self.logger.error(f"Error clearing database content: {e}")
             return False, str(e)
-    
+
     def prepare_target_database(
         self,
         dbname: str,
@@ -266,11 +267,11 @@ class DatabaseManager:
         """
         try:
             if not self._connection:
-                if not self._connect_system():
+                if not self._connect_system() or not self._connection:
                     return False, "Cannot connect to system database"
-            
+
             exists = self.database_exists(dbname)
-            
+
             if exists:
                 if drop_if_exists:
                     self.logger.info(f"Database '{dbname}' exists, clearing content...")
@@ -282,24 +283,24 @@ class DatabaseManager:
                     return False, f"Database '{dbname}' already exists"
             else:
                 self.logger.info(f"Database '{dbname}' does not exist, creating...")
-            
+
             # Create the database
             success, msg = self.create_database(dbname, owner=owner)
             if success:
                 return True, f"Target database '{dbname}' is ready"
             else:
                 return False, f"Failed to create database: {msg}"
-                
+
         except Exception as e:
             self.logger.error(f"Error preparing target database: {e}")
             return False, str(e)
         finally:
             self._disconnect()
-    
+
     def __enter__(self):
         self._connect_system()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._disconnect()
         return False
@@ -333,7 +334,7 @@ def prepare_target_db(
         user=user,
         password=password,
     )
-    
+
     return manager.prepare_target_database(
         dbname=dbname,
         drop_if_exists=drop_if_exists,
@@ -353,7 +354,7 @@ def prepare_target_db_from_dsn(dsn: str, drop_if_exists: bool = True) -> Tuple[b
         Tuple of (success, message)
     """
     params = parse_dsn(dsn)
-    
+
     return prepare_target_db(
         host=params.get("host", "localhost"),
         port=int(params.get("port", 5432)),

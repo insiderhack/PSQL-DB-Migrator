@@ -4,9 +4,9 @@ Utility functions for PostgreSQL Migrator.
 
 import re
 import time
-from datetime import datetime, timedelta
-from typing import Optional, Tuple, Dict, Any
+from datetime import datetime
 from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 
 def parse_dsn(dsn: str) -> Dict[str, str]:
@@ -21,12 +21,12 @@ def parse_dsn(dsn: str) -> Dict[str, str]:
     """
     result = {}
     pattern = re.compile(r"(\w+)=([^\s]+)")
-    
+
     for match in pattern.finditer(dsn):
         key = match.group(1)
         value = match.group(2)
         result[key] = value
-    
+
     return result
 
 
@@ -56,14 +56,14 @@ def build_dsn(
         f"dbname={dbname}",
         f"user={user}",
     ]
-    
+
     if password:
         parts.append(f"password={password}")
-    
+
     return " ".join(parts)
 
 
-def format_bytes(num_bytes: int) -> str:
+def format_bytes(num_bytes: float) -> str:
     """
     Format bytes to human-readable string.
     
@@ -92,10 +92,10 @@ def format_duration(seconds: float) -> str:
     """
     if seconds < 60:
         return f"{seconds:.1f}s"
-    
+
     hours, remainder = divmod(int(seconds), 3600)
     minutes, secs = divmod(remainder, 60)
-    
+
     parts = []
     if hours:
         parts.append(f"{hours}h")
@@ -103,7 +103,7 @@ def format_duration(seconds: float) -> str:
         parts.append(f"{minutes}m")
     if secs or not parts:
         parts.append(f"{secs}s")
-    
+
     return " ".join(parts)
 
 
@@ -126,60 +126,60 @@ def estimate_migration_time(
     # Base estimates (very rough)
     # Assume ~50 MB/s for pg_dump, ~30 MB/s for pg_restore
     size_gb = db_size_bytes / (1024 ** 3)
-    
+
     # Base time for data
     min_data_time = int(size_gb * 20)  # 50 MB/s
     max_data_time = int(size_gb * 60)  # 17 MB/s
-    
+
     # Add time for tables
     min_table_time = table_count * 1
     max_table_time = table_count * 5
-    
+
     # Add time for indexes
     min_index_time = index_count * 2
     max_index_time = index_count * 10
-    
+
     min_total = max(60, min_data_time + min_table_time + min_index_time)
     max_total = max(300, max_data_time + max_table_time + max_index_time)
-    
+
     return (min_total, max_total)
 
 
 class Timer:
     """Simple timer for tracking duration."""
-    
+
     def __init__(self):
         self.start_time: Optional[float] = None
         self.end_time: Optional[float] = None
-    
+
     def start(self):
         """Start the timer."""
         self.start_time = time.time()
         self.end_time = None
-    
+
     def stop(self) -> float:
         """Stop the timer and return elapsed seconds."""
         self.end_time = time.time()
         return self.elapsed
-    
+
     @property
     def elapsed(self) -> float:
         """Get elapsed time in seconds."""
         if self.start_time is None:
             return 0.0
-        
+
         end = self.end_time or time.time()
         return end - self.start_time
-    
+
     @property
     def formatted(self) -> str:
         """Get formatted elapsed time."""
         return format_duration(self.elapsed)
-    
+
     def __enter__(self):
         self.start()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
         return False
@@ -246,14 +246,14 @@ def validate_connection_params(
     """
     if not host:
         return False, "Host is required"
-    
+
     if not 1 <= port <= 65535:
         return False, "Port must be between 1 and 65535"
-    
+
     if not dbname:
         return False, "Database name is required"
-    
+
     if not user:
         return False, "Username is required"
-    
+
     return True, None

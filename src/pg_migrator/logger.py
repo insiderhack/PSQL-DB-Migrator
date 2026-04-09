@@ -4,16 +4,16 @@ Provides beautiful colored console output with file logging support.
 """
 
 import logging
+import queue
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-import queue
 
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.text import Text
 
-from .ui.theme import COLORS, get_theme
+from .ui.theme import get_theme
 
 
 class GUILogHandler(logging.Handler):
@@ -35,7 +35,7 @@ class GUILogHandler(logging.Handler):
 
 class MigrationLogger:
     """Custom logger with Rich integration."""
-    
+
     def __init__(
         self,
         name: str = "pg_migrator",
@@ -55,7 +55,7 @@ class MigrationLogger:
         self.logger = logging.getLogger(name)
         self.logger.setLevel(getattr(logging, level.upper()))
         self.logger.handlers.clear()
-        
+
         # Rich console handler
         self.console = console or Console(theme=get_theme())
         rich_handler = RichHandler(
@@ -68,7 +68,7 @@ class MigrationLogger:
         )
         rich_handler.setFormatter(logging.Formatter("%(message)s"))
         self.logger.addHandler(rich_handler)
-        
+
         # File handler if specified
         if log_file:
             log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -80,10 +80,10 @@ class MigrationLogger:
                 )
             )
             self.logger.addHandler(file_handler)
-            self.log_file = log_file
+            self.log_file: Optional[Path] = log_file
         else:
             self.log_file = None
-    
+
     def add_gui_handler(self, log_queue: queue.Queue):
         """Attach a GUI queue handler to stream stripped logs."""
         gui_handler = GUILogHandler(log_queue)
@@ -92,44 +92,44 @@ class MigrationLogger:
     def debug(self, message: str, **kwargs):
         """Log debug message."""
         self.logger.debug(f"[dim]{message}[/dim]", **kwargs)
-    
+
     def info(self, message: str, **kwargs):
         """Log info message."""
         self.logger.info(f"[pg.accent]{message}[/pg.accent]", **kwargs)
-    
+
     def success(self, message: str, **kwargs):
         """Log success message with green styling."""
         self.logger.info(f"[status.success]✓ {message}[/status.success]", **kwargs)
-    
+
     def warning(self, message: str, **kwargs):
         """Log warning message."""
         self.logger.warning(f"[status.warning]⚠ {message}[/status.warning]", **kwargs)
-    
+
     def error(self, message: str, **kwargs):
         """Log error message."""
         self.logger.error(f"[status.error]✗ {message}[/status.error]", **kwargs)
-    
+
     def critical(self, message: str, **kwargs):
         """Log critical message."""
         self.logger.critical(f"[bold status.error]✗ CRITICAL: {message}[/bold status.error]", **kwargs)
-    
+
     def step(self, step_num: int, total: int, message: str):
         """Log a migration step."""
         self.logger.info(
             f"[pg.highlight]Step {step_num}/{total}:[/pg.highlight] [pg.accent]{message}[/pg.accent]"
         )
-    
+
     def section(self, title: str):
         """Log a section header."""
         self.console.rule(f"[bold pg.primary]{title}[/bold pg.primary]")
-    
+
     def migration_start(self, source_version: int, target_version: int = 18):
         """Log migration start."""
         self.section("Migration Started")
         self.info(f"Source: PostgreSQL {source_version}")
         self.info(f"Target: PostgreSQL {target_version}")
         self.info(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+
     def migration_complete(self, duration: str, success: bool):
         """Log migration completion."""
         if success:
